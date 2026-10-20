@@ -647,3 +647,10 @@ input[type=range] { accent-color: var(--sel); width: 100%; }
 .lista-tintas b { display: block; font-size: 12px; color: var(--muted); font-weight: 600; }
 .lista-tintas small { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
 .joy-knob.corre { background: #fff; box-shadow: 0 0 0 4px rgba(255, 255, 255, .35), 0 2px 8px rgba(0, 0, 0, .35); }
+.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+#u-ajustes:empty { display: none; }
+.nota-mira { align-self: center; color: #fff; background: rgba(15,20,19,.62); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+@media (max-width: 860px) {
+  /* com o painel de ferramentas aberto o 3D fica baixo: as ações da mira não cabem acima do joystick */
+  .workspace[data-ferr="1"] .acoes-passeio, .workspace[data-insp="1"] .acoes-passeio { display: none; }
+}

@@ -46,13 +46,13 @@ export function createView3D(container, opts = {}) {
   controls.maxPolarAngle = Math.PI * 0.47; controls.minDistance = 0.7; controls.maxDistance = 90;
   controls.screenSpacePanning = true;
   // zoom em direção ao ponto sob o cursor (roda) ou entre os dedos (pinça), em vez de ao centro da tela
-  controls.zoomToCursor = true; controls.zoomSpeed = 1.15; controls.panSpeed = 1;
+  controls.zoomToCursor = true; controls.zoomSpeed = 1.6; controls.panSpeed = 1.15;
   // dois dedos: pinça aproxima e os dois arrastam juntos; um dedo gira
   controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
   // dedo e mouse têm ritmos diferentes: no toque a rotação é um pouco mais lenta e desliza mais depois de soltar
   const perfilEntrada = (tipo) => {
-    if (tipo === 'touch') { controls.rotateSpeed = 0.8; controls.dampingFactor = 0.07; }
-    else { controls.rotateSpeed = 1; controls.dampingFactor = 0.1; }
+    if (tipo === 'touch') { controls.rotateSpeed = 1.2; controls.dampingFactor = 0.11; }
+    else { controls.rotateSpeed = 1.3; controls.dampingFactor = 0.14; }
   };
   renderer.domElement.addEventListener('pointerdown', (ev) => perfilEntrada(ev.pointerType), { capture: true });
   // Safari do iOS dá zoom na página com a pinça mesmo com touch-action: none
@@ -195,7 +195,7 @@ export function createView3D(container, opts = {}) {
     for (const g of aberturasG) descartar(g);
     aberturasG = [];
     const H = plan.tip.peDireito, ab = abDe(store.projeto?.fix);
-    for (const o of plan.openings) { const g = construirAbertura(o, H, ab); wallGroups.get(o.wall).g.add(g); aberturasG.push(g); }
+    for (const o of plan.openings) { const g = construirAbertura(o, H, ab); g.traverse((q) => { q.userData.aberturaId = o.id; }); wallGroups.get(o.wall).g.add(g); aberturasG.push(g); }
   }
 
   function construirAbertura(o, H, ab = abDe(null)) {
@@ -802,8 +802,8 @@ export function createView3D(container, opts = {}) {
     // olhar: o alvo (yawT/pitchT) vem do dedo ou do mouse; a câmera o persegue com suavização exponencial.
     // Depois que o dedo sai, a velocidade angular restante decai (inércia).
     const k = walk.keys;
-    if (k.has('ArrowLeft')) walk.yawT -= dt * 1.8;
-    if (k.has('ArrowRight')) walk.yawT += dt * 1.8;
+    if (k.has('ArrowLeft')) walk.yawT -= dt * 2.4;
+    if (k.has('ArrowRight')) walk.yawT += dt * 2.4;
     if (walk.vYaw || walk.vPitch) {
       walk.yawT += walk.vYaw * dt; walk.pitchT = Math.max(-1.25, Math.min(1.25, walk.pitchT + walk.vPitch * dt));
       const dec = Math.exp(-dt * 4.2); walk.vYaw *= dec; walk.vPitch *= dec;
@@ -812,7 +812,7 @@ export function createView3D(container, opts = {}) {
     let girou = false;
     const dy = walk.yawT - walk.yaw, dp = walk.pitchT - walk.pitch;
     if (Math.abs(dy) > 1e-4 || Math.abs(dp) > 1e-4) {
-      const a = 1 - Math.exp(-dt * 30);
+      const a = 1 - Math.exp(-dt * 48);
       walk.yaw += dy * a; walk.pitch += dp * a;
       if (Math.abs(walk.yawT - walk.yaw) < 1e-4) walk.yaw = walk.yawT;
       if (Math.abs(walk.pitchT - walk.pitch) < 1e-4) walk.pitch = walk.pitchT;
@@ -836,7 +836,7 @@ export function createView3D(container, opts = {}) {
         alvoF = (walk.mv[1] / jm) * vel; alvoS = (walk.mv[0] / jm) * vel;
       }
     }
-    const kAcel = (Math.hypot(alvoF, alvoS) > Math.hypot(walk.vf, walk.vs) ? 9 : 13);
+    const kAcel = (Math.hypot(alvoF, alvoS) > Math.hypot(walk.vf, walk.vs) ? 12 : 16);
     const t = 1 - Math.exp(-dt * kAcel);
     walk.vf += (alvoF - walk.vf) * t; walk.vs += (alvoS - walk.vs) * t;
     const vm = Math.hypot(walk.vf, walk.vs);
@@ -923,6 +923,38 @@ export function createView3D(container, opts = {}) {
     if (mode === 'passeio' && h.distance > 8) return null;
     return { tipo, room: h.object.userData.room, edge: h.object.userData.edge };
   }
+  // Tudo o que pode ser editado sob um raio: móvel, peça da construtora, porta ou janela, parede, piso ou teto.
+  // O primeiro objeto visível atingido decide; paredes sem dados de superfície só bloqueiam.
+  const visivelDe = (o) => { for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; };
+  function nomeAbertura(id) {
+    const o = plan.openings.find((x) => x.id === id); if (!o) return 'Abertura';
+    const porta = /^P/.test(o.tipo);
+    return `${porta ? 'Porta' : 'Janela'}${o.rotulo ? ' · ' + o.rotulo : ''}`;
+  }
+  function descreverAlvo(a) {
+    if (!a) return null;
+    if (a.kind === 'item') { const it = store.projeto.itens.find((i) => i.uid === a.uid); return it ? { ...a, nome: it.nome, estados: estadosDoItem(a.uid), livre: !!catalogoPorId[it.tipo]?.teto } : null; }
+    if (a.kind === 'fixo') { const f = plan.fixos.find((x) => x.id === a.id); return f ? { ...a, nome: f.nome } : null; }
+    if (a.kind === 'abertura') return { ...a, nome: nomeAbertura(a.id) };
+    if (a.kind === 'superficie') { const r = plan.rooms.find((q) => q.id === a.room); return { ...a, nome: `${{ parede: 'Parede', piso: 'Piso', teto: 'Teto' }[a.tipo]}${r ? ' · ' + r.nome : ''}` }; }
+    return null;
+  }
+  function alvoDoRaio(rc, { maxObj = Infinity, maxSup = Infinity } = {}) {
+    const lista = [...moveis.children, ...fixosG, ...aberturasG, ...peleMeshes, ...pisoMeshes, ...caixasParede];
+    if (tetosG.visible) lista.push(...tetoMeshes);
+    for (const h of rc.intersectObjects(lista, true)) {
+      if (!visivelDe(h.object)) continue;
+      const u = h.object.userData;
+      if (u.uid) return h.distance <= maxObj ? { kind: 'item', uid: u.uid, dist: h.distance, point: h.point } : null;
+      if (u.fixoId) return h.distance <= maxObj ? { kind: 'fixo', id: u.fixoId, dist: h.distance, point: h.point } : null;
+      if (u.aberturaId) return h.distance <= maxObj ? { kind: 'abertura', id: u.aberturaId, dist: h.distance, point: h.point } : null;
+      if (u.surface) return h.distance <= maxSup && u.room ? { kind: 'superficie', tipo: u.surface, room: u.room, edge: u.edge, dist: h.distance, point: h.point } : null;
+      if (h.object.material && h.object.material.transparent && h.object.material.opacity < 0.3) continue;
+      return null;
+    }
+    return null;
+  }
+  const chaveAlvo = (a) => (a ? `${a.kind}:${a.uid || a.id || a.room + '|' + (a.edge ?? '') + '|' + a.tipo}` : '');
   function pontoPiso(ev, y = 0) {
     apontar(ev);
     planoPiso.constant = -y;
@@ -1030,10 +1062,9 @@ export function createView3D(container, opts = {}) {
       }
       if (down && down.id === ev.pointerId) {
         if (!down.moveu && Math.hypot(ev.clientX - down.x, ev.clientY - down.y) <= 4) return;
-        // incremental, sem salto ao passar da folga de 4 px. Sensibilidade proporcional ao campo de visão:
-        // 1 px de arrasto desloca a mesma fração da imagem em qualquer tela e em qualquer zoom.
-        const rect = el.getBoundingClientRect();
-        const rad_px = (rad(camera.fov) / Math.max(200, rect.height)) * (ev.pointerType === 'touch' ? 1.15 : 0.85);
+        // incremental, sem salto ao passar da folga de 4 px. Ganho fixo em rad/px (mouse ~0,29°/px, dedo ~0,42°/px),
+        // reduzido na mesma proporção quando o zoom do Passeio fecha o campo de visão.
+        const rad_px = (ev.pointerType === 'touch' ? 0.0074 : 0.0050) * (camera.fov / fovAuto());
         const ini = down.moveu ? [down.lx, down.ly] : [down.x, down.y];
         const ddx = (ev.clientX - ini[0]) * rad_px, ddy = (ev.clientY - ini[1]) * rad_px;
         down.moveu = true;
@@ -1089,9 +1120,16 @@ export function createView3D(container, opts = {}) {
     } else {
       const sw = pickInterruptor(ev);
       if (sw) { el.style.cursor = 'pointer'; const r = plan.rooms.find((q) => q.id === sw); opts.onHover?.(`Interruptor · ${r.nome}`, ev.clientX, ev.clientY); return; }
-      const h = mode !== 'forro' ? pickItem(ev) : null;
-      el.style.cursor = h ? 'grab' : '';
-      opts.onHover?.(null);
+      if (mode === 'forro') { el.style.cursor = ''; opts.onHover?.(null); return; }
+      apontar(ev);
+      const a = descreverAlvo(alvoDoRaio(ray, { maxObj: mode === 'passeio' ? 9 : Infinity, maxSup: -1 }));
+      if (!a) { el.style.cursor = ''; opts.onHover?.(null); return; }
+      if (a.kind === 'item') { el.style.cursor = mode === 'passeio' ? 'pointer' : 'grab'; const rr = el.getBoundingClientRect(); if (mode === 'passeio' && Math.hypot(ev.clientX - rr.left - rr.width / 2, ev.clientY - rr.top - rr.height / 2) < 60) { opts.onHover?.(null); return; } opts.onHover?.(`${a.nome} · ${mode === 'passeio' ? 'clique para editar' : 'arraste para mover, clique para editar'}`, ev.clientX, ev.clientY); return; }
+      el.style.cursor = 'pointer';
+      // no Passeio, perto do centro a mira já mostra o mesmo nome
+      const rr = el.getBoundingClientRect();
+      if (mode === 'passeio' && Math.hypot(ev.clientX - rr.left - rr.width / 2, ev.clientY - rr.top - rr.height / 2) < 60) { opts.onHover?.(null); return; }
+      opts.onHover?.(`${a.nome} · clique para editar`, ev.clientX, ev.clientY);
     }
   }
   // duplo clique ou duplo toque: aproxima do ponto tocado; se já está perto, volta ao enquadramento geral
@@ -1128,6 +1166,13 @@ export function createView3D(container, opts = {}) {
         if (info) { mostrarHover(info); opts.onSuperficie?.(info, { escopo }); }
       } else {
         const h = mode === 'forro' ? null : pickItem(ev);
+        // peça da construtora, porta ou janela: abre a edição (só se nada mais à frente foi atingido)
+        if (!h && mode !== 'forro') {
+          apontar(ev);
+          const a = alvoDoRaio(ray, { maxObj: mode === 'passeio' ? 9 : Infinity, maxSup: -1 });
+          if (a?.kind === 'fixo') { down = null; opts.onEditar?.({ kind: 'fixo', id: a.id }); return; }
+          if (a?.kind === 'abertura') { down = null; opts.onEditar?.({ kind: 'abertura', id: a.id }); return; }
+        }
         const agora = ev.timeStamp;
         const duplo = mode !== 'passeio' && ultimoToque && agora - ultimoToque.t < 320 && Math.hypot(ev.clientX - ultimoToque.x, ev.clientY - ultimoToque.y) < 26;
         ultimoToque = mode !== 'passeio' ? { t: agora, x: ev.clientX, y: ev.clientY } : null;
@@ -1160,7 +1205,7 @@ export function createView3D(container, opts = {}) {
       } else if (mira.uid && !ev.repeat) {
         if (ev.code === 'KeyE') { opts.onMiraAcao?.('pegar', mira.uid); ev.preventDefault(); return; }
         if (ev.code === 'KeyF') { opts.onMiraAcao?.('abrir', mira.uid); ev.preventDefault(); return; }
-      }
+      } else if (mira.info && !ev.repeat && ev.code === 'KeyE') { opts.onMiraAcao?.('editar', null, mira.info); ev.preventDefault(); return; }
     }
     if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft'].includes(ev.code)) {
       ev.preventDefault();
@@ -1209,7 +1254,7 @@ export function createView3D(container, opts = {}) {
   // ------------------------------------------------------------ carregar móvel em primeira pessoa (modo passeio)
   const rayM = new THREE.Raycaster();
   const carry = { ativo: false, it: null, existente: false, ghost: null, mats: [], elevManual: null, rotManual: 0, valido: true, ultimo: '' };
-  let mira = { uid: null, t: 0 };
+  let mira = { uid: null, key: '', info: null, t: 0 };
   function limparGhost() {
     if (carry.ghost) { scene.remove(carry.ghost); carry.ghost = null; }
     carry.mats = [];
@@ -1324,16 +1369,16 @@ export function createView3D(container, opts = {}) {
   }
   // o que está sob a mira (para pegar, abrir ou fechar)
   function atualizarMira(now) {
-    if (mode !== 'passeio' || carry.ativo) { if (mira.uid) { mira.uid = null; opts.onMira?.(null); } return; }
+    if (mode !== 'passeio' || carry.ativo) { if (mira.key) { mira.key = ''; mira.uid = null; mira.info = null; opts.onMira?.(null); } return; }
     if (now - mira.t < 110) return; mira.t = now;
-    rayM.setFromCamera(new THREE.Vector2(0, 0), camera); rayM.far = 3.4;
-    const h = rayM.intersectObjects(moveis.children.filter((g) => g.visible), true).find((q) => q.object.userData.uid);
-    const uid = h ? h.object.userData.uid : null;
-    if (uid === mira.uid) return;
-    mira.uid = uid;
-    if (!uid) { opts.onMira?.(null); return; }
-    const it = store.projeto.itens.find((i) => i.uid === uid);
-    opts.onMira?.(it ? { uid, nome: it.nome, estados: estadosDoItem(uid), livre: !!catalogoPorId[it.tipo]?.teto } : null);
+    camera.updateMatrixWorld();
+    rayM.setFromCamera(new THREE.Vector2(0, 0), camera); rayM.far = 7;
+    const a = alvoDoRaio(rayM, { maxObj: 3.4, maxSup: 5 });
+    const key = chaveAlvo(a);
+    if (key === mira.key) return;
+    mira.key = key; mira.uid = a?.kind === 'item' ? a.uid : null;
+    mira.info = descreverAlvo(a);
+    opts.onMira?.(mira.info);
   }
 
   // ------------------------------------------------------------ laço
@@ -1417,7 +1462,7 @@ export function createView3D(container, opts = {}) {
       autoFit = false; animarCamera(alvo.clone().add(off), alvo);
     },
     syncEstados, estadosDoItem,
-    carregar, cancelarCarry, confirmarCarry, girarCarry, alturaCarry, carryAtivo: () => carry.ativo, miraUid: () => mira.uid,
+    carregar, cancelarCarry, confirmarCarry, girarCarry, alturaCarry, carryAtivo: () => carry.ativo, miraUid: () => mira.uid, miraInfo: () => mira.info,
     refreshLuz() { if (!plan) return; aplicarEmissivos(); atualizarPool(); atualizarPontos(); },
     setMode(m) { if (m === mode) return; if (m !== 'passeio') cancelarCarry(); mode = m; walk.keys.clear(); aplicarModo(); opts.onMode?.(m); },
     getMode: () => mode,

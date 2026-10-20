@@ -7,7 +7,9 @@ import { $, $$, esc } from './util.js';
 import { tocar } from '../audio.js';
 
 let hooks = { plan: () => null, focar: () => {} };
-let selId = null;
+let selId = null, rolarAb = false, rolarSel = false;
+// chamada pelo 3D (clique na peça ou mira no Passeio)
+export function selecionarPeca(id) { if (id === '_ab') rolarAb = true; else { selId = id; rolarAb = false; rolarSel = true; } }
 
 export function iniciarPecas(h) {
   hooks = { ...hooks, ...h };
@@ -66,5 +68,7 @@ export function renderPecas() {
   }
   const ab = abDe(fix);
   const detAb = `<h3 class="sub">Portas e janelas</h3>${AB_SCHEMA.map((s) => campo(s, ab[s.k], 'ab')).join('')}<p class="nota">Largura e posição das aberturas seguem a planta e não mudam aqui.</p>`;
-  box.innerHTML = `<div class="fix-lista">${lista}</div><div class="grupo">${det}</div><div class="grupo">${detAb}</div>`;
+  box.innerHTML = `<div class="fix-lista">${lista}</div><div class="grupo">${det}</div><div class="grupo" id="fix-ab">${detAb}</div>`;
+  if (rolarAb) { rolarAb = false; requestAnimationFrame(() => $('#fix-ab')?.scrollIntoView({ block: 'start', behavior: 'smooth' })); }
+  else if (rolarSel) { rolarSel = false; requestAnimationFrame(() => $('.sel-fixo', box)?.scrollIntoView({ block: 'start', behavior: 'smooth' })); }
 }

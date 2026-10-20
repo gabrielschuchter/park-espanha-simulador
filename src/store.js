@@ -148,9 +148,30 @@ export function setAberturas(patch) { edit((p) => { p.fix._ab = { ...(p.fix._ab 
 
 // Simulação de uso (não persiste): portas abertas, cadeiras puxadas, pessoas sentadas. Vale para todos os móveis.
 export const uso = { aberto: false, cadeiras: false, pessoas: false };
-export function setUso(patch) { Object.assign(uso, patch); emit('uso'); }
-// Estado de um móvel: o global ou o do próprio item (ligado no inspetor)
-export const estadoDe = (it) => ({ portas: uso.aberto || it.aberto ? 1 : 0, cad: uso.cadeiras || it.cadeiras ? 1 : 0, pes: uso.pessoas || it.pessoas ? 1 : 0 });
+// A última ação vale. Ligar ou desligar a simulação geral aplica a todos os móveis (apaga os ajustes daquela chave);
+// mudar um móvel depois disso cria um ajuste próprio só dele (it.aberto/cadeiras/pessoas = true ou false),
+// que dura até a próxima mudança da simulação geral naquela mesma chave.
+export const USO_CHAVES = ['aberto', 'cadeiras', 'pessoas'];
+export const temAjuste = (it, k) => it && it[k] !== undefined && it[k] !== null;
+export const usoEfetivo = (it, k) => (temAjuste(it, k) ? !!it[k] : !!uso[k]);
+export function setUso(patch) {
+  const mudaram = Object.keys(patch).filter((k) => !!uso[k] !== !!patch[k]);
+  Object.assign(uso, patch);
+  let mexeu = false;
+  if (store.projeto) for (const it of store.projeto.itens) for (const k of mudaram) if (temAjuste(it, k)) { delete it[k]; mexeu = true; }
+  if (mexeu) agendarSalvar();
+  emit('uso');
+}
+// Alterna (ou define) um estado de um móvel em relação ao que ele mostra agora
+export function alternarUsoItem(it, k, valor) {
+  const novo = valor === undefined ? !usoEfetivo(it, k) : !!valor;
+  edit(() => { if (novo === !!uso[k]) delete it[k]; else it[k] = novo; });
+  return novo;
+}
+export function seguirGeral(it) { edit(() => { for (const k of USO_CHAVES) delete it[k]; }); }
+export function seguirGeralTodos() { edit((p) => { for (const it of p.itens) for (const k of USO_CHAVES) delete it[k]; }); }
+export const contarAjustes = () => (store.projeto?.itens || []).filter((it) => USO_CHAVES.some((k) => temAjuste(it, k))).length;
+export const estadoDe = (it) => ({ portas: usoEfetivo(it, 'aberto') ? 1 : 0, cad: usoEfetivo(it, 'cadeiras') ? 1 : 0, pes: usoEfetivo(it, 'pessoas') ? 1 : 0 });
 
 export function marcarNovo(id) { store.novos.add(id); }
 
@@ -193,7 +214,7 @@ export function criarProjeto(tipId, { sugestao = true, nome } = {}) {
   const p = {
     formato: FORMATO, id: uid(), tipologia: tipId,
     nome: nome || `Meu apartamento ${t.nome}${n ? ' ' + (n + 1) : ''}`,
-    itens: sugestao ? itensSugeridos(tipId) : [], paredes: {}, acab: ACAB_VAZIO(), fix: {},
+    itens: sugestao ? itensSugeridos(tipId) : [], paredes: {}, acab: ACAB_VAZIO(), fix: {}, usoV: 2,
     criado: Date.now(), atualizado: Date.now(),
   };
   setProjeto(p); salvarAgora();
@@ -202,6 +223,8 @@ export function criarProjeto(tipId, { sugestao = true, nome } = {}) {
 
 function setProjeto(p) {
   normalizarAcab(p);
+  // até a v3, false nos estados de uso queria dizer "seguir o geral"; agora false é ajuste próprio
+  if (!p.usoV) { for (const it of p.itens || []) for (const k of USO_CHAVES) if (!it[k]) delete it[k]; p.usoV = 2; }
   store.projeto = p; store.sel = null; store.past = []; store.future = []; baseline = null;
   store.status = 'salvo';
   emit('projeto');

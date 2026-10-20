@@ -6,7 +6,7 @@ import { ACAB_VAZIO, luzDe } from './data/acabamentos.js';
 import { preparePlan, pointInPoly, localToPlan, polyArea } from './geom.js';
 import {
   store, subscribe, edit, live, commit, undo, redo, select, selected, novoItem, uid,
-  abrirProjeto, criarProjeto, renomear, exportarJSON, importarJSON, itensSugeridos, salvarAgora, marcarNovo, uso, setUso,
+  abrirProjeto, criarProjeto, renomear, exportarJSON, importarJSON, itensSugeridos, salvarAgora, marcarNovo, uso, setUso, usoEfetivo, temAjuste, estadoDe, alternarUsoItem, seguirGeral, seguirGeralTodos, contarAjustes,
 } from './store.js';
 import { analisar, circulacao, distancias, portaFrase } from './analysis.js';
 import { createPlan2D } from './plan2d.js';
@@ -23,7 +23,7 @@ import {
 } from './ui/ferramentas.js';
 import { exportarPlantaPng, exportarPlantaSvg, exportarCsv, exportarFoto, itensPorComodo } from './ui/exportar.js';
 import { abrirTour, tourVisto } from './ui/tour.js';
-import { iniciarPecas, renderPecas } from './ui/pecas.js';
+import { iniciarPecas, renderPecas, selecionarPeca } from './ui/pecas.js';
 import { DICAS } from './data/dicas.js';
 
 let plan = null, plan2d = null, view3d = null, view3dLoading = null;
@@ -124,7 +124,7 @@ async function garantir3D() {
         onSelScreen: (p) => posBarra(barra3d, p),
         onPegar: () => tocar('pegar'), onEncaixe: () => tocar('encaixe'), onSoltar: aoSoltar,
         onPasso: ({ piso }) => tocarPasso(piso),
-        onCarry: aoCarregar, onCarryFim: fimCarregar, onCarryVazio: () => { tocar('erro'); toast('Mire numa parede, no piso, no teto ou em cima de um móvel.'); }, onMira: aoMirar, onMiraAcao: acaoMira,
+        onCarry: aoCarregar, onCarryFim: fimCarregar, onCarryVazio: () => { tocar('erro'); toast('Mire numa parede, no piso, no teto ou em cima de um móvel.'); }, onMira: aoMirar, onEditar: editarAlvo, onMiraAcao: acaoMira,
       });
       view3d.setPlan(plan);
       view3d.syncItems(store.projeto.itens);
@@ -164,7 +164,7 @@ function sincronizar3D() {
   v3.setFerramenta(tool);
   v3.setEscopo(escopoAtual(tool) || 'comodo');
   if (viewMode === '2d') return;
-  if (tool === 'teto' && v3.getMode() !== 'forro') { forroAuto = true; v3.setMode('forro'); }
+  if (tool === 'teto' && v3.getMode() !== 'forro' && v3.getMode() !== 'passeio') { forroAuto = true; v3.setMode('forro'); }
   else if (tool !== 'teto' && forroAuto && v3.getMode() === 'forro') { forroAuto = false; v3.setMode('orbita'); }
 }
 
@@ -272,8 +272,13 @@ $('#pop-uso').addEventListener('change', (ev) => {
 });
 function sincronizarUsoUI() {
   $('#u-aberto').checked = uso.aberto; $('#u-cad').checked = uso.cadeiras; $('#u-pes').checked = uso.pessoas;
-  $('#b-uso').classList.toggle('on', uso.aberto || uso.cadeiras || uso.pessoas);
+  const n = contarAjustes();
+  $('#b-uso').classList.toggle('on', uso.aberto || uso.cadeiras || uso.pessoas || n > 0);
+  $('#u-ajustes').innerHTML = n
+    ? `${n} ${n === 1 ? 'móvel está diferente' : 'móveis estão diferentes'} do geral por escolha sua. <button type="button" class="link" id="u-seguir">Igualar todos ao geral</button>`
+    : '';
 }
+$('#pop-uso').addEventListener('click', (ev) => { if (ev.target.id === 'u-seguir') { seguirGeralTodos(); tocar('clique'); sincronizarUsoUI(); view3d?.syncEstados(); } });
 function atualizarEscala(view) {
   const s = view.s;
   const passo = s > 140 ? 0.5 : s < 35 ? 2 : 1;
@@ -394,22 +399,46 @@ function aoMirar(info) {
   const tip = $('#mira-tip'), ac = $('#acoes-passeio');
   $('#mira').classList.toggle('alvo', !!info);
   if (!info) { tip.hidden = true; ac.hidden = true; return; }
-  const e = info.estados || {};
+  const bt = (k, t) => `<button class="btn btn-sm" data-ma="${k}">${t}</button>`;
   tip.hidden = false;
+  if (info.kind !== 'item') {
+    const rot = { fixo: 'Editar peça', abertura: 'Editar portas e janelas', superficie: { parede: 'Pintar ou revestir', piso: 'Trocar piso', teto: 'Trocar forro' }[info.tipo] }[info.kind];
+    tip.textContent = toque() ? info.nome : `${info.nome} · E ${rot.toLowerCase()}`;
+    ac.innerHTML = bt('editar', rot) + (info.kind === 'fixo' ? '<small class="nota-mira">posição fixa (ponto hidráulico)</small>' : '');
+    ac.hidden = false; return;
+  }
+  const e = info.estados || {};
   tip.textContent = toque() ? info.nome : `${info.nome} · E pegar${e.portas ? ' · F abrir/fechar' : ''}`;
   const it = store.projeto.itens.find((i) => i.uid === info.uid) || {};
-  const bt = (k, t) => `<button class="btn btn-sm" data-ma="${k}">${t}</button>`;
   ac.innerHTML = bt('pegar', 'Pegar e mover')
-    + (e.portas ? bt('abrir', it.aberto ? 'Fechar portas' : 'Abrir portas') : '')
-    + (e.cad ? bt('cad', it.cadeiras ? 'Empurrar cadeiras' : 'Puxar cadeiras') : '')
-    + (e.pes ? bt('pes', it.pessoas ? 'Tirar pessoas' : 'Sentar pessoas') : '');
+    + (e.portas ? bt('abrir', usoEfetivo(it, 'aberto') ? 'Fechar portas' : 'Abrir portas') : '')
+    + (e.cad ? bt('cad', usoEfetivo(it, 'cadeiras') ? 'Empurrar cadeiras' : 'Puxar cadeiras') : '')
+    + (e.pes ? bt('pes', usoEfetivo(it, 'pessoas') ? 'Tirar pessoas' : 'Sentar pessoas') : '')
+    + bt('editar', 'Editar');
   ac.hidden = false;
 }
-function acaoMira(acao, uid) {
+// abre a ferramenta sem alternar (setTool fecha o painel se a ferramenta já estiver ativa)
+function abrirTool(t) {
+  if (tool === t) { ferrAberto = true; inspMobile = false; if (t === 'fixos') renderPecas(); atualizarLayout(); tocar('abrir'); }
+  else setTool(t);
+}
+// editar o que foi clicado ou mirado no 3D: móvel, peça da construtora, abertura ou superfície
+function editarAlvo(a) {
+  if (!a) return;
+  if (a.kind === 'item') { if (tool !== 'moveis' && tool !== 'luz') setTool('moveis'); select(a.uid); if (mobile()) { inspMobile = true; atualizarLayout(); } tocar('abrir'); return; }
+  if (a.kind === 'fixo' || a.kind === 'abertura') { selecionarPeca(a.kind === 'fixo' ? a.id : '_ab'); abrirTool('fixos'); return; }
+  if (a.kind === 'superficie') {
+    const t = a.tipo === 'parede' ? 'paredes' : a.tipo;
+    abrirTool(t);
+    toast(`Escolha ${a.tipo === 'parede' ? 'a cor ou o revestimento' : a.tipo === 'piso' ? 'o piso' : 'o forro'} no painel e clique na superfície.`);
+  }
+}
+function acaoMira(acao, uid, info) {
+  if (acao === 'editar') { editarAlvo(info || view3d?.miraInfo() || (uid ? { kind: 'item', uid } : null)); return; }
   const it = store.projeto.itens.find((i) => i.uid === uid); if (!it || !view3d) return;
   if (acao === 'pegar') { view3d.carregar(it, true); tocar('pegar'); return; }
   const k = { abrir: 'aberto', cad: 'cadeiras', pes: 'pessoas' }[acao];
-  if (k) { edit(() => { it[k] = !it[k]; }); tocar(it[k] ? 'abrir' : 'fechar'); aoMirar({ uid, nome: it.nome, estados: view3d.estadosDoItem(uid) }); }
+  if (k) { const v = alternarUsoItem(it, k); tocar(v ? 'abrir' : 'fechar'); aoMirar({ kind: 'item', uid, nome: it.nome, estados: view3d.estadosDoItem(uid) }); }
 }
 $('#acoes-passeio').addEventListener('click', (ev) => { const b = ev.target.closest('[data-ma]'); if (b && view3d) acaoMira(b.dataset.ma, view3d.miraUid()); });
 
@@ -432,9 +461,12 @@ function usoHtml(it) {
   const e = estadosDe(it); if (!e.portas && !e.cad && !e.pes) return '';
   const lin = (id, t, v) => `<label class="toggle-linha"><span>${t}</span><input type="checkbox" id="${id}" ${v ? 'checked' : ''}></label>`;
   return `<div class="grupo"><h3>Uso</h3>
-    ${e.portas ? lin('i-aberto', 'Portas e gavetas abertas', it.aberto) : ''}
-    ${e.cad ? lin('i-cad', 'Cadeiras puxadas', it.cadeiras) : ''}
-    ${e.pes ? lin('i-pes', 'Pessoas sentadas', it.pessoas) : ''}
+    ${e.portas ? lin('i-aberto', 'Portas e gavetas abertas', usoEfetivo(it, 'aberto')) : ''}
+    ${e.cad ? lin('i-cad', 'Cadeiras puxadas', usoEfetivo(it, 'cadeiras')) : ''}
+    ${e.pes ? lin('i-pes', 'Pessoas sentadas', usoEfetivo(it, 'pessoas')) : ''}
+    ${['aberto', 'cadeiras', 'pessoas'].some((k) => temAjuste(it, k))
+    ? '<p class="nota">Este móvel está diferente da “Simulação de uso” geral por escolha sua. Se você ligar ou desligar a mesma opção no geral, ele volta a acompanhar. <button type="button" class="link" id="i-seguir">Igualar ao geral agora</button></p>'
+    : '<p class="nota">Acompanha a “Simulação de uso” geral. Mudar aqui vale só para este móvel.</p>'}
     <p class="nota">Serve para ver o espaço de que o móvel precisa quando está em uso. Nada disso muda as medidas.</p></div>`;
 }
 function renderInspetor() {
@@ -509,7 +541,7 @@ $('#insp-item').addEventListener('change', (ev) => {
   const t = ev.target, it = selected(); if (!it) return;
   if (t.type === 'checkbox') {
     const k = { 'i-aberto': 'aberto', 'i-cad': 'cadeiras', 'i-pes': 'pessoas' }[t.id];
-    if (k) { edit(() => { it[k] = t.checked; }); tocar(t.checked ? 'abrir' : 'fechar'); }
+    if (k) { alternarUsoItem(it, k, t.checked); tocar(t.checked ? 'abrir' : 'fechar'); renderInspItem(it); sincronizarUsoUI(); }
     return;
   }
   const n = parseFloat(String(t.value).replace(',', '.'));
@@ -533,6 +565,7 @@ $('#insp-item').addEventListener('change', (ev) => {
 });
 $('#insp-item').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && ev.target.matches('input')) ev.target.blur(); });
 $('#insp-item').addEventListener('click', (ev) => {
+  if (ev.target.id === 'i-seguir') { const it = selected(); if (it) { seguirGeral(it); tocar('clique'); renderInspItem(it); sincronizarUsoUI(); } return; }
   const it = selected(); if (!it) return;
   const b = ev.target.closest('button'); if (!b) return;
   if (b.id === 'i-rr') girar(90);
@@ -728,7 +761,7 @@ subscribe((kind) => {
     if (tool === 'fixos') renderPecas();
     agendarAnalise();
   }
-  if (kind === 'uso') { sincronizarUsoUI(); view3d?.syncEstados(); }
+  if (kind === 'uso') { sincronizarUsoUI(); view3d?.syncEstados(); const it = selected(); if (it) renderInspItem(it); }
   if (kind === 'acab') {
     plan2d.redrawAcab();
     view3d?.refreshAcab();
@@ -913,4 +946,5 @@ window.__pe = {
   store, Som, get plan() { return plan; }, get view3d() { return view3d; }, get plan2d() { return plan2d; },
   FIX_SCHEMA, AB_SCHEMA, setFixo, setAberturas, setView, setTool, garantir3D, aplicar, analise: () => ultimaAnalise, adicionar, trocarPeriodo,
   luzDe: (r) => luzDe(store.projeto.acab, r),
+  uso, setUso, alternarUsoItem, estadoDe, catalogoPorId, select, editarAlvo,
 };
