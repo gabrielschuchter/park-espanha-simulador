@@ -16,7 +16,7 @@ npm run build    # gera dist/index.html (arquivo único, cerca de 870 KB, 250 KB
 
 ### Publicar no GitHub Pages
 
-O arquivo `.github/workflows/pages.yml` compila e publica `dist/` a cada push na branch `main`. No repositório, abra Settings, Pages, e escolha "GitHub Actions" como fonte. O endereço fica em `https://<usuario>.github.io/<repositorio>/`. O `vite.config.js` já usa `base: './'`, então funciona em subpasta.
+Para publicar no GitHub Pages, abra Settings, Pages, escolha "GitHub Actions" como fonte e execute manualmente o workflow `Publicar no GitHub Pages` na aba Actions. O endereço fica em `https://<usuario>.github.io/<repositorio>/`. O `vite.config.js` já usa `base: './'`, então funciona em subpasta.
 
 ## O que o simulador faz
 
