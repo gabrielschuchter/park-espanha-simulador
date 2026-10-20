@@ -1,11 +1,24 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
 <title>Simulador Park Espanha</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Simulador do apartamento Park Espanha: mobilie em escala real, pinte, troque piso e forro, ligue as luzes e caminhe pelo apartamento em 3D.">
+<meta name="description" content="Simulador do apartamento Park Espanha: mobilie em escala real, pinte, troque piso e forro, ligue as luzes e caminhe pelo apartamento em 3D. Projeto independente e sem fins lucrativos.">
+<meta name="theme-color" content="#a3262c">
+<meta property="og:title" content="Simulador Park Espanha">
+<meta property="og:description" content="Monte seu apartamento antes de receber as chaves: móveis em escala real, acabamentos, luz e passeio em 3D.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23a3262c%22/%3E%3Cpath d=%22M14 16h36v32H14zM30 16v18h20%22 fill=%22none%22 stroke=%22%23fff%22 stroke-width=%225%22 stroke-linejoin=%22round%22 stroke-linecap=%22round%22/%3E%3Crect x=%2220%22 y=%2245.5%22 width=%228%22 height=%225%22 fill=%22%23a3262c%22/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAAC0ElEQVR42u3d0U3rUBBFUd9RaoEf6IhUBx2RH9IMFIAiwBj7zmGtBl5esnU0WCiMZQLPdw/vC+2dr5dx9GsYAiYp8CFikuIeIiYp7iFkksIuMZP0MGAImaS1LjGTtNZDyCStdYmZpLUuMZMUdYmZpKhLzCRFXWImKeoSM0lRl5hJirq8TSQp60zSSpeYSYrayUH+yWGd6brSJWaSonZykHtyWGe6r7SFJv+HQmgftHODhLPDQuPkgKmDdm6QcnZYaJwcIGjYwXA/Y6FB0CBoEDSChginmV/c09urT2hiL/ePFpocMw6OoImKWtBERS1ooqIWNFEO/10OTzKyHP3kw0ITRdAIGgQNggZBI2jIcOr6wo9+3rn2+fmMv6G25f/PQoOgQdAIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBoEDYJG0CBoEDQIGkGDoEHQIGgQNIIGQYOgQdAgaAQNggZBw8ZO3oJ9+dvmFhoEjaBB0CBoEDR8zWO7lW79iWOP5Sw0CBoEjaBB0CBo+D2P7TZ263FeN10fP1ponBwgaBA0CBpBg6BB0CBoEDSCBkGDoEHQIGgEDYIGQYOgQdAIGgQNggZBw2dtv2jmu1+E8pdf/OK7oC00CBoEjaBB0CBoEDTMH3TKF4Qzx2dpobHQVppZP8PyhpD02ZU3hqTPrLxBJH1W4/nu4d1Hgx8KQdAgaBA0/zTo8/UyvA0kOF8vw0Lj5ABBw15Bu6NJuJ8tNE4OaBG0s4Pu54aFxskBbYJ2dtD53LDQ5J8cVpqu63xzoUVNx5idHOSfHFaaruv85UKLmk4xOzn4PyeHlabbOn97oUVNh5h/dHKImtlj/vENLWpmjnnVD4WiZtaYVwUtamaNeXXQombGmJdlWTaJ0jeYcnTIv15oa81sMW+20NaaWcawZn+BiPnQhbbWHDl6u62puEW8x79zyHkgbhFHBS1wAf+VD8gh6jkS/OYzAAAAAElFTkSuQmCC">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="./src/styles.css">
+</head>
+<body>
+<noscript>O simulador precisa de JavaScript ativado.</noscript>
 
 <div id="app">
   <!-- TELA INICIAL -->
@@ -32,6 +45,7 @@
     </section>
     <footer class="home-foot">
       <p>As plantas reproduzem as cotas do material de vendas e o memorial descritivo. Espessuras de parede, largura de portas e janelas e posição de algumas peças são estimativas e devem ser conferidas na vistoria. Para móveis planejados, a construtora recomenda medir no local.</p>
+          <p class="credito">Feito de forma independente e sem fins lucrativos, por Gabriel Schuchter.</p>
     </footer>
   </section>
 
@@ -68,6 +82,7 @@
             <hr>
             <button role="menuitem" data-acao="medidas">Sobre as medidas</button>
             <button role="menuitem" data-acao="atalhos">Atalhos e controles</button>
+            <button role="menuitem" data-acao="sobre">Sobre este projeto</button>
           </div>
         </div>
       </div>
@@ -81,7 +96,9 @@
         <button data-tool="piso" title="Trocar o piso"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-5 9 5-9 5zM3 9v4l9 5 9-5V9M12 14v5" /></svg><span>Piso</span></button>
         <button data-tool="teto" title="Forro, sanca e rebaixo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 5v4h4v3h10V9h4V5M7 12v3M17 12v3" /></svg><span>Teto</span></button>
         <button data-tool="luz" title="Luzes e luminárias"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0012 3z" /></svg><span>Luz</span></button>
+        <button data-tool="fixos" title="Pia, tanque, louças, box, portas e janelas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h16M6 11v5a4 4 0 004 4h4a4 4 0 004-4v-5M9 11V6a2 2 0 012-2h1M15 20v1M9 20v1" /></svg><span>Peças</span></button>
         <span class="rail-esp"></span>
+        <button data-tool="dicas" title="Dicas para organizar o apartamento"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6-4.6-1.9 4.6-1.9zM18.5 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" /></svg><span>Dicas</span></button>
         <button data-tool="resumo" title="Avisos, lista de móveis e exportar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7" /></svg><span>Resumo</span><b class="badge" id="rail-badge" hidden>0</b></button>
       </nav>
 
@@ -137,6 +154,18 @@
           <div class="cat-grid" id="luz-grid"></div>
         </div>
 
+        <div class="tp" data-tp="fixos" hidden>
+          <div class="painel-head"><h2>Peças do apartamento</h2><button class="icon-btn so-mobile" data-fechar="ferr" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
+          <p class="dica">Pia, tanque, louças, box, portas e janelas também podem ser trocados. Mudar o modelo ou a cor é só estética; mudar o ponto hidráulico de lugar exige obra e autorização.</p>
+          <div id="fixos-corpo"></div>
+        </div>
+
+        <div class="tp" data-tp="dicas" hidden>
+          <div class="painel-head"><h2>Dicas</h2><button class="icon-btn so-mobile" data-fechar="ferr" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
+          <div id="dicas-corpo"></div>
+          <p class="credito">Feito de forma independente e sem fins lucrativos, por Gabriel Schuchter.</p>
+        </div>
+
         <div class="tp" data-tp="resumo" hidden>
           <div class="painel-head"><h2>Resumo</h2><button class="icon-btn so-mobile" data-fechar="ferr" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
           <div id="resumo-corpo"></div>
@@ -179,7 +208,37 @@
             </div>
             <button class="chip so-orbita" id="b-paredes" title="Como mostrar as paredes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V8l8-4 8 4v12M9 20v-6h6v6" /></svg><span>Paredes: recorte</span></button>
             <select id="ir-para" class="campo campo-sm so-passeio" aria-label="Ir para o cômodo"></select>
+            <button class="chip" id="b-uso" aria-haspopup="true" aria-expanded="false" title="Ver portas abertas, cadeiras puxadas e pessoas sentadas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V5l9-2v17M14 8l5 1v11M5 20h14M11 12v.5" /></svg><span>Simular uso</span></button>
             <button class="icon-btn chip-ic" id="b-foto" aria-label="Salvar foto da vista" title="Salvar foto da vista"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-2h6l2 2h3v11H4zM12 17a3.5 3.5 0 100-7 3.5 3.5 0 000 7z" /></svg></button>
+          </div>
+          <div class="pop pop-uso" id="pop-uso" hidden>
+            <label class="toggle"><input type="checkbox" id="u-aberto"><span>Abrir portas, gavetas e geladeira</span></label>
+            <label class="toggle"><input type="checkbox" id="u-cad"><span>Puxar as cadeiras das mesas</span></label>
+            <label class="toggle"><input type="checkbox" id="u-pes"><span>Mostrar pessoas sentadas</span></label>
+            <p class="nota">Vale para todos os móveis. Para um móvel só, selecione-o e use “Uso” nos detalhes.</p>
+          </div>
+          <div class="zoom3d" id="zoom3d" role="group" aria-label="Zoom da vista 3D">
+            <button class="icon-btn" id="z3-mais" aria-label="Aproximar" title="Aproximar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
+            <button class="icon-btn" id="z3-menos" aria-label="Afastar" title="Afastar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg></button>
+            <button class="icon-btn" id="z3-fit" aria-label="Centralizar e enquadrar" title="Centralizar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5M12 9.5v5M9.5 12h5" /></svg></button>
+          </div>
+          <div class="mira" id="mira" hidden aria-hidden="true"><i></i></div>
+          <div class="mira-tip" id="mira-tip" hidden></div>
+          <div class="acoes-passeio" id="acoes-passeio" hidden role="group" aria-label="Ações do móvel"></div>
+          <div class="carry" id="carry" hidden role="group" aria-label="Posicionar móvel">
+            <div class="carry-nome" id="carry-nome"></div>
+            <div class="carry-linha">
+              <button class="icon-btn" id="cy-esq" aria-label="Girar para a esquerda" title="Girar (Q)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 108-8H8M8 4L5 7l3 3" /></svg></button>
+              <button class="icon-btn" id="cy-dir" aria-label="Girar para a direita" title="Girar (E)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 11-8-8h4M16 4l3 3-3 3" /></svg></button>
+              <span class="carry-sep"></span>
+              <button class="icon-btn" id="cy-baixo" aria-label="Abaixar" title="Abaixar (F)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg></button>
+              <output id="cy-alt" class="carry-alt" aria-live="off">0 cm</output>
+              <button class="icon-btn" id="cy-cima" aria-label="Subir" title="Subir (R)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg></button>
+            </div>
+            <div class="carry-linha">
+              <button class="btn" id="cy-x">Cancelar</button>
+              <button class="btn btn-pri" id="cy-ok">Colocar aqui</button>
+            </div>
           </div>
           <p class="hint-3d" id="hint-3d"></p>
           <div class="tip-3d" id="tip-3d" hidden></div>
@@ -195,16 +254,27 @@
 
     <!-- barra inferior (celular) -->
     <nav class="bottom-bar" id="bottom-bar" aria-label="Ferramentas">
+      <div class="bb-tools">
       <button data-tool="moveis"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16v6H4zM6 18v2M18 18v2M6 12V9a2 2 0 012-2h8a2 2 0 012 2v3" /></svg><span>Móveis</span></button>
       <button data-tool="paredes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a2 2 0 012 2v3H5zM18 7.5h2v4h-8v3M12 14.5v6" /></svg><span>Paredes</span></button>
       <button data-tool="piso"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-5 9 5-9 5zM3 9v4l9 5 9-5V9M12 14v5" /></svg><span>Piso</span></button>
       <button data-tool="teto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 5v4h4v3h10V9h4V5M7 12v3M17 12v3" /></svg><span>Teto</span></button>
       <button data-tool="luz"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0012 3z" /></svg><span>Luz</span></button>
+      <button data-tool="fixos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h16M6 11v5a4 4 0 004 4h4a4 4 0 004-4v-5M9 11V6a2 2 0 012-2h1" /></svg><span>Peças</span></button>
+      <button data-tool="dicas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6-4.6-1.9 4.6-1.9z" /></svg><span>Dicas</span></button>
+      <button data-tool="resumo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7" /></svg><span>Resumo</span></button>
+      </div>
       <button id="bb-view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z M12 12l8-4.5M12 12v9M12 12L4 7.5" /></svg><span>Ver em 3D</span></button>
     </nav>
   </section>
+
+  <div class="carregando" id="carregando" role="status" aria-live="polite" hidden>
+    <div class="car-in"><div class="car-spin" aria-hidden="true"></div><p id="car-txt">Carregando…</p><div class="car-bar" id="car-bar" aria-hidden="true"><i></i></div></div>
+  </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <dialog id="dlg" class="dlg"><div id="dlg-body"></div></dialog>
 </div>
 <script type="module" src="./src/main.js"></script>
+</body>
+</html>

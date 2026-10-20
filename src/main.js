@@ -1,10 +1,12 @@
+import { FIX_SCHEMA, AB_SCHEMA } from './data/fixos.js';
+import { setFixo, setAberturas } from './store.js';
 import { tipologiaPorId, TIPOS_ABERTURA } from './data/tipologias.js';
 import { CATEGORIAS, CORES, catalogoPorId } from './data/catalogo.js';
 import { ACAB_VAZIO, luzDe } from './data/acabamentos.js';
 import { preparePlan, pointInPoly, localToPlan, polyArea } from './geom.js';
 import {
   store, subscribe, edit, live, commit, undo, redo, select, selected, novoItem, uid,
-  abrirProjeto, criarProjeto, renomear, exportarJSON, importarJSON, itensSugeridos, salvarAgora, marcarNovo,
+  abrirProjeto, criarProjeto, renomear, exportarJSON, importarJSON, itensSugeridos, salvarAgora, marcarNovo, uso, setUso,
 } from './store.js';
 import { analisar, circulacao, distancias, portaFrase } from './analysis.js';
 import { createPlan2D } from './plan2d.js';
@@ -12,7 +14,8 @@ import { snapItem, colide, levarParaParede } from './snap.js';
 import { tetoY } from './tetoGeo.js';
 import * as Som from './audio.js';
 import { tocar, tocarPasso } from './audio.js';
-import { $, $$, esc, cm, fmtM2, mobile, toque, toast, abrirDialogo, confirmar, baixar, slug } from './ui/util.js';
+import { abrirCoresMarca } from './ui/cores.js';
+import { $, $$, esc, cm, fmtM2, mobile, toque, toast, abrirDialogo, confirmar, baixar, slug, carregando, frame } from './ui/util.js';
 import { renderHome, iniciarHome } from './ui/home.js';
 import { renderCatalogo, iniciarCatalogo } from './ui/catalogo-ui.js';
 import {
@@ -20,6 +23,8 @@ import {
 } from './ui/ferramentas.js';
 import { exportarPlantaPng, exportarPlantaSvg, exportarCsv, exportarFoto, itensPorComodo } from './ui/exportar.js';
 import { abrirTour, tourVisto } from './ui/tour.js';
+import { iniciarPecas, renderPecas } from './ui/pecas.js';
+import { DICAS } from './data/dicas.js';
 
 let plan = null, plan2d = null, view3d = null, view3dLoading = null;
 let viewMode = '2d', tool = 'moveis', ferrAberto = true, inspMobile = false, forroAuto = false, periodo = 'dia', paredesModo = 'recorte';
@@ -51,6 +56,8 @@ function setTool(t) {
   sincronizar3D();
   if (t === 'resumo') renderResumo();
   if (t === 'luz') desenharLuz();
+  if (t === 'fixos') renderPecas();
+  if (t === 'dicas') renderDicas();
   renderInspetor();
   atualizarLayout();
   tocar('abrir');
@@ -65,28 +72,39 @@ document.addEventListener('click', (ev) => {
 });
 
 // ======================================================================== abrir o editor
-function abrirEditor(novo = false) {
-  const tip = tipologiaPorId(store.projeto.tipologia);
-  plan = preparePlan(tip);
-  $('#home').hidden = true; $('#editor').hidden = false;
-  $('#proj-nome').value = store.projeto.nome;
-  $('#proj-tip').textContent = `TIPOLOGIA ${tip.nome.toUpperCase()} · ${fmtM2(tip.areaPrivativa)} m² · pé-direito ${String(tip.peDireito).replace('.', ',')} m`;
-  if (!plan2d) {
-    plan2d = createPlan2D($('#plan-host'), {
-      onView: atualizarEscala, onRoomClick: (id, t) => aplicar(t === 'paredes' ? 'parede' : t, id, null, false),
-      onLuzToggle: alternarLuzComodo, onSelScreen: (p) => posBarra(barra2d, p),
-      onPegar: () => tocar('pegar'), onEncaixe: () => tocar('encaixe'), onSoltar: aoSoltar, aoMover: ajustarTeto,
-    });
-  }
-  plan2d.setPlan(plan);
-  plan2d.redrawItems();
-  if (view3d) { view3d.setPlan(plan); view3d.syncItems(store.projeto.itens); }
-  tool = 'moveis'; ferrAberto = !mobile(); inspMobile = false;
-  trocarFerramenta('moveis'); plan2d.setFerramenta('moveis'); view3d?.setFerramenta('moveis');
-  preencherIrPara(); renderCatalogo(); redesenharFerramentas();
-  setView(window.innerWidth >= 1600 ? 'split' : '2d');
-  agendarAnalise(0); renderInspetor(); atualizarHistorico(); atualizarStatus(); atualizarLayout();
-  if (novo || !tourVisto()) setTimeout(abrirTour, 700);
+async function abrirEditor(novo = false) {
+  const car = carregando('Abrindo o apartamento…');
+  try {
+    await frame();
+    const tip = tipologiaPorId(store.projeto.tipologia);
+    plan = preparePlan(tip);
+    for (const f of plan.fixos) f.oculto = !!store.projeto.fix?.[f.id]?.oculto;
+    $('#home').hidden = true; $('#editor').hidden = false;
+    $('#proj-nome').value = store.projeto.nome;
+    $('#proj-tip').textContent = `TIPOLOGIA ${tip.nome.toUpperCase()} · ${fmtM2(tip.areaPrivativa)} m² · pé-direito ${String(tip.peDireito).replace('.', ',')} m`;
+    car.prog(0.2); car.txt('Preparando a planta…'); await frame();
+    if (!plan2d) {
+      plan2d = createPlan2D($('#plan-host'), {
+        onView: atualizarEscala, onRoomClick: (id, t) => aplicar(t === 'paredes' ? 'parede' : t, id, null, false),
+        onLuzToggle: alternarLuzComodo, onSelScreen: (p) => posBarra(barra2d, p),
+        onPegar: () => tocar('pegar'), onEncaixe: () => tocar('encaixe'), onSoltar: aoSoltar, aoMover: ajustarTeto,
+      });
+    }
+    plan2d.setPlan(plan);
+    plan2d.redrawItems();
+    tool = 'moveis'; ferrAberto = !mobile(); inspMobile = false;
+    trocarFerramenta('moveis'); plan2d.setFerramenta('moveis');
+    preencherIrPara(); renderCatalogo(); redesenharFerramentas();
+    car.prog(0.4); car.txt('Montando o 3D…'); await frame();
+    // o 3D é a vista padrão em qualquer tela; a planta fica a um toque
+    await setView('3d', true);
+    car.prog(0.9);
+    agendarAnalise(0); renderInspetor(); atualizarHistorico(); atualizarStatus(); atualizarLayout();
+    car.txt('Preparando os gráficos…'); await frame();
+    await view3d?.compilar();
+    await (view3d?.pronto() ?? Promise.resolve());
+  } finally { car.fim(); }
+  if (novo || !tourVisto()) setTimeout(abrirTour, 500);
 }
 
 $('#btn-voltar').addEventListener('click', () => { salvarAgora(); $('#editor').hidden = true; $('#home').hidden = false; renderHome(); view3d?.setVisible(false); tocar('fechar'); });
@@ -106,6 +124,7 @@ async function garantir3D() {
         onSelScreen: (p) => posBarra(barra3d, p),
         onPegar: () => tocar('pegar'), onEncaixe: () => tocar('encaixe'), onSoltar: aoSoltar,
         onPasso: ({ piso }) => tocarPasso(piso),
+        onCarry: aoCarregar, onCarryFim: fimCarregar, onCarryVazio: () => { tocar('erro'); toast('Mire numa parede, no piso, no teto ou em cima de um móvel.'); }, onMira: aoMirar, onMiraAcao: acaoMira,
       });
       view3d.setPlan(plan);
       view3d.syncItems(store.projeto.itens);
@@ -113,24 +132,27 @@ async function garantir3D() {
       view3d.setParedes(paredesModo);
       view3d.setFerramenta(tool);
       view3d.setEscopo(escopoAtual(tool) || 'comodo');
+      view3d.syncEstados(true);
       return view3d;
     });
   }
   return view3dLoading;
 }
 
-async function setView(v) {
+async function setView(v, inicial = false) {
   if (v === 'split' && mobile()) v = '3d';
   viewMode = v;
   $('#workspace').dataset.view = v;
   $$('.view-seg button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
   $('#bb-view span').textContent = v === '2d' ? 'Ver em 3D' : 'Ver planta';
   if (v !== '2d') {
+    const jaExistia = !!view3d;
     const v3 = await garantir3D();
+    if (inicial && jaExistia) { v3.setPlan(plan); v3.syncItems(store.projeto.itens); v3.setFerramenta(tool); }
     v3.setVisible(true);
     aoMudarModo(v3.getMode());
     sincronizar3D();
-  } else view3d?.setVisible(false);
+  } else { view3d?.setVisible(false); }
   redesenharFerramentas();
   requestAnimationFrame(() => plan2d?.fit());
 }
@@ -181,10 +203,14 @@ function aoMudarModo(m) {
   $$('#seg-modo [data-modo]').forEach((x) => x.classList.toggle('on', x.dataset.modo === m));
   $('#vista-3d').dataset.modo = m;
   $('#joy').hidden = !(m === 'passeio' && toque());
+  $('#mira').hidden = m !== 'passeio';
+  $('#vista-3d').dataset.mouse = toque() ? '0' : '1';
+  if (m !== 'passeio') aoMirar(null);
+  else if (mobile() && ferrAberto) { ferrAberto = false; atualizarLayout(); } // no passeio o 3D ocupa a tela toda
   const hint = {
     orbita: toque() ? 'Arraste para girar · pinça para aproximar · toque num móvel e arraste para mover' : 'Arraste para girar · botão direito move a câmera · role para aproximar · arraste um móvel para mover',
     cima: 'Vista de cima com corte a 1,15 m',
-    passeio: toque() ? 'Joystick para andar · arraste a tela para olhar em volta' : 'W A S D ou setas para andar · arraste para olhar · Shift corre',
+    passeio: toque() ? 'Joystick para andar · arraste a tela para olhar · escolha um móvel e ele aparece na mira' : 'W A S D andam · arraste para olhar · escolha um móvel no catálogo para colocá-lo onde você olha · E pega o móvel da mira',
     forro: tool === 'teto' ? 'Vista de baixo para cima. Escolha o forro e clique no cômodo.' : 'Vista de baixo para cima: forro, sancas e luminárias',
   }[m];
   const h = $('#hint-3d'); h.textContent = hint; h.hidden = false;
@@ -197,7 +223,15 @@ function aoMudarModo(m) {
 (() => {
   const joy = $('#joy'), knob = $('.joy-knob', joy);
   let id = null, c = null;
-  const set = (x, y) => { knob.style.transform = `translate(${x * 38}px, ${y * 38}px)`; view3d?.moveInput(x, -y); };
+  // zona morta de 12% no centro (o polegar nunca fica parado), e o resto reescalado para 0..1 sem salto na borda da zona
+  const ZM = 0.12;
+  const set = (x, y) => {
+    knob.style.transform = `translate(${x * 38}px, ${y * 38}px)`;
+    const l = Math.hypot(x, y);
+    const m = l < ZM ? 0 : (l - ZM) / (1 - ZM);
+    knob.classList.toggle('corre', m > 0.92);
+    view3d?.moveInput(l ? (x / l) * m : 0, l ? (-y / l) * m : 0);
+  };
   joy.addEventListener('pointerdown', (ev) => { id = ev.pointerId; joy.setPointerCapture(id); const r = joy.getBoundingClientRect(); c = [r.left + r.width / 2, r.top + r.height / 2]; ev.preventDefault(); ev.stopPropagation(); });
   joy.addEventListener('pointermove', (ev) => {
     if (ev.pointerId !== id) return;
@@ -221,6 +255,25 @@ function dicaHover3d(txt, x, y) {
 $('#z-mais').addEventListener('click', () => plan2d.zoom(1.25));
 $('#z-menos').addEventListener('click', () => plan2d.zoom(0.8));
 $('#z-fit').addEventListener('click', () => plan2d.fit());
+// zoom da vista 3D (a roda do mouse e a pinça continuam funcionando, mas nem todo aparelho tem)
+$('#z3-mais').addEventListener('click', () => { tocar('clique'); view3d?.zoomBy(0.78); });
+$('#z3-menos').addEventListener('click', () => { tocar('clique'); view3d?.zoomBy(1.28); });
+$('#z3-fit').addEventListener('click', () => { tocar('clique'); view3d?.resetCamera(); });
+// simulação de uso: portas abertas, cadeiras puxadas, pessoas sentadas
+$('#b-uso').addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  const p = $('#pop-uso'); p.hidden = !p.hidden; $('#b-uso').setAttribute('aria-expanded', String(!p.hidden)); tocar(p.hidden ? 'fechar' : 'abrir');
+});
+document.addEventListener('click', (ev) => { if (!ev.target.closest('#pop-uso') && !ev.target.closest('#b-uso')) { $('#pop-uso').hidden = true; $('#b-uso').setAttribute('aria-expanded', 'false'); } });
+$('#pop-uso').addEventListener('change', (ev) => {
+  const t = ev.target; tocar('clique');
+  setUso({ aberto: $('#u-aberto').checked, cadeiras: $('#u-cad').checked, pessoas: $('#u-pes').checked });
+  if (t.id) view3d?.syncEstados();
+});
+function sincronizarUsoUI() {
+  $('#u-aberto').checked = uso.aberto; $('#u-cad').checked = uso.cadeiras; $('#u-pes').checked = uso.pessoas;
+  $('#b-uso').classList.toggle('on', uso.aberto || uso.cadeiras || uso.pessoas);
+}
 function atualizarEscala(view) {
   const s = view.s;
   const passo = s > 140 ? 0.5 : s < 35 ? 2 : 1;
@@ -270,6 +323,10 @@ function adicionar(catId, ponto, exato = false, extra = {}) {
   const c = catalogoPorId[catId];
   if (c.personalizado && !extra.w) { dialogoSobMedida(); return; }
   const it = novoItem(catId, extra);
+  if (noPasseio() && !ponto) {
+    // primeira pessoa: o móvel vira um fantasma na mira, e você escolhe onde colocar
+    if (view3d.carregar(it, false)) { tocar('pegar'); if (mobile()) { ferrAberto = false; atualizarLayout(); } return; }
+  }
   const p = ponto || pontoPadrao();
   const itens = store.projeto.itens;
   if (exato && plan.rooms.some((r) => pointInPoly(p[0], p[1], r.poly))) { it.x = p[0]; it.y = p[1]; snapItem(plan, itens, it); }
@@ -299,12 +356,87 @@ function aoSoltar(kind, it) {
   tocar(kind === 'rot' ? 'girar' : kind === 'resize' ? 'encaixe' : 'soltar');
 }
 
+// ======================================================================== carregar móvel em primeira pessoa
+const noPasseio = () => view3d?.getMode() === 'passeio' && viewMode !== '2d';
+function aoCarregar(info) {
+  $('#vista-3d').classList.toggle('carregando-movel', !!info);
+  $('#vista-3d').classList.toggle('carry-ativo', !!info);
+  const box = $('#carry');
+  if (!info) { box.hidden = true; return; }
+  if (box.hidden) { box.hidden = false; $('#mira-tip').hidden = true; $('#acoes-passeio').hidden = true; }
+  $('#carry-nome').textContent = info.existente ? `Movendo: ${info.nome}` : info.nome;
+  $('#cy-alt').textContent = info.teto ? 'no forro' : `${info.elevCm} cm`;
+  $('#cy-baixo').disabled = $('#cy-cima').disabled = info.teto;
+  $('#cy-ok').textContent = info.valido ? 'Colocar aqui' : 'Colocar mesmo assim';
+  $('#cy-ok').classList.toggle('aviso', !info.valido);
+}
+function fimCarregar({ it, existente }) {
+  const colidiu = colide(plan, it, store.projeto.itens.filter((i) => i.uid !== it.uid));
+  if (existente) {
+    const real = store.projeto.itens.find((i) => i.uid === it.uid); if (!real) return;
+    edit(() => { real.x = it.x; real.y = it.y; real.rot = it.rot; real.elev = it.elev; });
+    tocar('soltar'); toast(`${real.nome} movido.`);
+  } else {
+    marcarNovo(it.uid);
+    edit((proj) => proj.itens.push(it));
+    tocar(catalogoPorId[it.tipo].luz ? 'lampada' : 'montar'); toast(`${it.nome} colocado a ${Math.round((it.elev || 0) * 100)} cm do chão.`);
+  }
+  if (colidiu) setTimeout(() => toast('Ficou sobreposto a uma parede ou a outro móvel. Dá para ajustar na planta.'), 1800);
+}
+$('#cy-esq').addEventListener('click', () => view3d?.girarCarry(-90));
+$('#cy-dir').addEventListener('click', () => view3d?.girarCarry(90));
+$('#cy-baixo').addEventListener('click', () => view3d?.alturaCarry(-5));
+$('#cy-cima').addEventListener('click', () => view3d?.alturaCarry(5));
+$('#cy-x').addEventListener('click', () => { tocar('fechar'); view3d?.cancelarCarry(); });
+$('#cy-ok').addEventListener('click', () => view3d?.confirmarCarry());
+
+function aoMirar(info) {
+  const tip = $('#mira-tip'), ac = $('#acoes-passeio');
+  $('#mira').classList.toggle('alvo', !!info);
+  if (!info) { tip.hidden = true; ac.hidden = true; return; }
+  const e = info.estados || {};
+  tip.hidden = false;
+  tip.textContent = toque() ? info.nome : `${info.nome} · E pegar${e.portas ? ' · F abrir/fechar' : ''}`;
+  const it = store.projeto.itens.find((i) => i.uid === info.uid) || {};
+  const bt = (k, t) => `<button class="btn btn-sm" data-ma="${k}">${t}</button>`;
+  ac.innerHTML = bt('pegar', 'Pegar e mover')
+    + (e.portas ? bt('abrir', it.aberto ? 'Fechar portas' : 'Abrir portas') : '')
+    + (e.cad ? bt('cad', it.cadeiras ? 'Empurrar cadeiras' : 'Puxar cadeiras') : '')
+    + (e.pes ? bt('pes', it.pessoas ? 'Tirar pessoas' : 'Sentar pessoas') : '');
+  ac.hidden = false;
+}
+function acaoMira(acao, uid) {
+  const it = store.projeto.itens.find((i) => i.uid === uid); if (!it || !view3d) return;
+  if (acao === 'pegar') { view3d.carregar(it, true); tocar('pegar'); return; }
+  const k = { abrir: 'aberto', cad: 'cadeiras', pes: 'pessoas' }[acao];
+  if (k) { edit(() => { it[k] = !it[k]; }); tocar(it[k] ? 'abrir' : 'fechar'); aoMirar({ uid, nome: it.nome, estados: view3d.estadosDoItem(uid) }); }
+}
+$('#acoes-passeio').addEventListener('click', (ev) => { const b = ev.target.closest('[data-ma]'); if (b && view3d) acaoMira(b.dataset.ma, view3d.miraUid()); });
+
 // ======================================================================== inspetor do móvel
 const LADOS = { '0,1': 'Frente', '0,-1': 'Fundo', '-1,0': 'Esquerda', '1,0': 'Direita' };
 function campoNum(id, label, valor, unidade = 'cm', attrs = '') {
   return `<label class="med" for="${id}">${label}<span class="campo-num"><input id="${id}" type="number" inputmode="decimal" value="${valor}" ${attrs}><span class="u">${unidade}</span></span></label>`;
 }
 let inspUid = null;
+// o que o móvel sabe fazer: abrir portas e gavetas, ter cadeiras puxadas, receber pessoas sentadas
+const MODELOS_PORTAS = new Set(['armario', 'guardaRoupa', 'geladeira', 'fogao', 'lavaLoucas', 'maquina', 'eletroP', 'gaveteiro', 'aereo', 'microondas']);
+const MODELOS_PESSOAS = new Set(['sofa', 'sofaChaise', 'sofaCanto', 'poltrona', 'cadeira', 'cadeiraEscritorio', 'banqueta', 'puff', 'mesaJ', 'jantar', 'jantarRedonda']);
+function estadosDe(it) {
+  const real = view3d?.estadosDoItem?.(it.uid);
+  if (real && (real.portas || real.cad || real.pes)) return real;
+  const m = catalogoPorId[it.tipo]?.modelo;
+  return { portas: MODELOS_PORTAS.has(m), cad: m === 'mesaJ' || m === 'jantar' || m === 'jantarRedonda', pes: MODELOS_PESSOAS.has(m) };
+}
+function usoHtml(it) {
+  const e = estadosDe(it); if (!e.portas && !e.cad && !e.pes) return '';
+  const lin = (id, t, v) => `<label class="toggle-linha"><span>${t}</span><input type="checkbox" id="${id}" ${v ? 'checked' : ''}></label>`;
+  return `<div class="grupo"><h3>Uso</h3>
+    ${e.portas ? lin('i-aberto', 'Portas e gavetas abertas', it.aberto) : ''}
+    ${e.cad ? lin('i-cad', 'Cadeiras puxadas', it.cadeiras) : ''}
+    ${e.pes ? lin('i-pes', 'Pessoas sentadas', it.pessoas) : ''}
+    <p class="nota">Serve para ver o espaço de que o móvel precisa quando está em uso. Nada disso muda as medidas.</p></div>`;
+}
 function renderInspetor() {
   const it = selected();
   if (!it) { $('#insp-item').innerHTML = ''; inspUid = null; syncBarras(); atualizarLayout(); return; }
@@ -339,7 +471,8 @@ function renderInspItem(it) {
         <button class="icon-btn" id="i-rr" aria-label="Girar 90° para a direita" title="Girar +90° (R)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4v6h-6M19.5 10A8 8 0 1012 20" /></svg></button>
       </div>
     </div>
-    ${pal ? `<div class="grupo"><h3>Acabamento</h3><div class="cores" id="i-cores">${pal.map(([hex, nome]) => `<button class="cor${hex === it.cor ? ' on' : ''}" style="background:${hex}" data-cor="${hex}" aria-label="${nome}" title="${nome}"></button>`).join('')}</div></div>` : ''}
+    ${usoHtml(it)}
+    ${pal ? `<div class="grupo"><h3>Acabamento</h3><div class="cores" id="i-cores">${pal.map(([hex, nome]) => `<button class="cor${hex === it.cor ? ' on' : ''}" style="background:${hex}" data-cor="${hex}" aria-label="${nome}" title="${nome}"></button>`).join('')}</div>${c.paleta === 'madeira' ? `<button type="button" class="btn btn-sm" id="i-maiscores">Cores de tinta de marca…</button>${it.corNome ? `<p class="nota">${esc(it.corNome)}</p>` : ''}` : ''}</div>` : ''}
     <div class="grupo"><h3>Avisos</h3><ul class="alertas" id="i-alertas"></ul></div>
     <div class="acoes-row">
       <button class="btn btn-sm" id="i-dup">Duplicar</button>
@@ -374,6 +507,11 @@ function atualizarInspItem(it) {
 
 $('#insp-item').addEventListener('change', (ev) => {
   const t = ev.target, it = selected(); if (!it) return;
+  if (t.type === 'checkbox') {
+    const k = { 'i-aberto': 'aberto', 'i-cad': 'cadeiras', 'i-pes': 'pessoas' }[t.id];
+    if (k) { edit(() => { it[k] = t.checked; }); tocar(t.checked ? 'abrir' : 'fechar'); }
+    return;
+  }
   const n = parseFloat(String(t.value).replace(',', '.'));
   if (t.id === 'i-nome') { edit(() => { it.nome = t.value.trim() || catalogoPorId[it.tipo].nome; }); return; }
   if (Number.isNaN(n)) { atualizarInspItem(it); return; }
@@ -401,7 +539,11 @@ $('#insp-item').addEventListener('click', (ev) => {
   if (b.id === 'i-rl') girar(-90);
   if (b.id === 'i-dup') duplicar();
   if (b.id === 'i-del') excluir();
-  if (b.dataset.cor) { edit(() => { it.cor = b.dataset.cor; }); tocar('pintar'); }
+  if (b.id === 'i-maiscores') {
+    abrirCoresMarca({ titulo: `Cor de tinta para ${it.nome}`, atual: it.cor, nome: it.corNome, onPick: (o) => { edit(() => { it.cor = o.cor; it.corNome = o.marca ? `${o.marca === 'suvinil' ? 'Suvinil' : 'Sherwin-Williams'} ${o.nome} (${o.codigo})` : o.nome; }); tocar('pintar'); } });
+    return;
+  }
+  if (b.dataset.cor) { edit(() => { it.cor = b.dataset.cor; delete it.corNome; }); tocar('pintar'); }
 });
 
 function girar(g) { const it = selected(); if (!it) return; edit(() => { it.rot = (((it.rot || 0) + g) % 360 + 360) % 360; }); tocar('girar'); }
@@ -474,6 +616,14 @@ function renderResumo() {
   const total = store.projeto.itens.length;
   const grupo = (nome, its) => its.length ? `<div class="lm-grupo"><h4>${esc(nome)} <span>${its.length}</span></h4><ul>${its.map((i) => `<li data-uid="${i.uid}"><span>${esc(i.nome)}</span><span class="m">${cm(i.w)} × ${cm(i.d)} × ${cm(i.h)}</span></li>`).join('')}</ul></div>` : '';
   const keep = $('#ferr').scrollTop;
+  const rotuloTinta = (t) => (t.marca ? `${t.marca === 'suvinil' ? 'Suvinil' : 'Sherwin-Williams'} ${t.nome} (${t.codigo})` : (t.nome && t.nome !== 'cor personalizada' ? t.nome : t.cor.toUpperCase()));
+  const tintas = [];
+  for (const r of plan.rooms) {
+    const t = store.projeto.acab.parede?.[r.id];
+    if (t?.t === 'tinta') tintas.push([r.nome, t]);
+    for (const [k, d] of Object.entries(store.projeto.acab.destaque || {})) if (k.startsWith(r.id + ':') && d.t === 'tinta') tintas.push([`${r.nome}, parede de destaque`, d]);
+  }
+  const tintasHtml = tintas.length ? `<div class="grupo"><h3>Tintas escolhidas · ${tintas.length}</h3><ul class="lista-tintas">${tintas.map(([n, t]) => `<li><i style="background:${t.cor}"></i><span><b>${esc(n)}</b>${esc(rotuloTinta(t))} <small>${t.cor.toUpperCase()}</small></span></li>`).join('')}</ul><p class="nota">Cores na tela são aproximadas. Antes de comprar, confira o código no leque físico da marca.</p></div>` : '';
   $('#resumo-corpo').innerHTML = `<div class="insp">
     <div class="grupo"><h3>Avisos ${avisosLi.length ? `· ${erros} conflito${erros === 1 ? '' : 's'}, ${avisos + bloq.length} atenção` : ''}</h3>
       <ul class="alertas">${avisosLi.length ? avisosLi.join('') : `<li class="ok">Nenhum conflito. Circulação de pelo menos ${cm(ultimaAnalise.circ?.passagem || 0.6)} cm até todos os cômodos.</li>`}</ul>
@@ -481,6 +631,7 @@ function renderResumo() {
     <div class="grupo"><h3>Lista de móveis · ${total}</h3>
       ${total ? plan.rooms.map((r) => grupo(r.nome, mapa.get(r.id))).join('') + grupo('Fora dos cômodos', fora) : '<p class="nota">Nenhum móvel ainda. Use a ferramenta Móveis.</p>'}
     </div>
+    ${tintasHtml}
     <div class="grupo"><h3>Exportar</h3>
       <div class="exp-grid">
         <button class="btn btn-sm" data-exp="png">Planta (PNG)</button>
@@ -516,6 +667,36 @@ function atualizarBadge() {
 }
 $('#bb-info-top').addEventListener('click', () => { if (tool === 'resumo') { ferrAberto = !ferrAberto; atualizarLayout(); } else setTool('resumo'); if (mobile()) { ferrAberto = true; atualizarLayout(); } });
 
+// ======================================================================== dicas
+function renderDicas() {
+  const box = $('#dicas-corpo'); if (box.dataset.ok) return; box.dataset.ok = '1';
+  box.innerHTML = `<p class="dicas-aviso">Ideias gerais, sem regra fixa. Use o que fizer sentido para o seu jeito de morar.</p>`
+    + DICAS.map((g) => `<div class="dicas-grupo"><h3 class="sub">${esc(g.grupo)}</h3>${g.itens.map((d) => `<div class="dica-card"><b>${esc(d.t)}</b><p>${esc(d.p)}</p>${d.acao ? `<button data-dica="${d.acao.k}">${esc(d.acao.r)}</button>` : ''}</div>`).join('')}</div>`).join('');
+}
+$('#dicas-corpo').addEventListener('click', async (ev) => {
+  const k = ev.target.closest('[data-dica]')?.dataset.dica; if (!k) return;
+  tocar('clique');
+  if (k === 'faixa' || k === 'giro') { setTool('moveis'); if (viewMode === '2d') await setView('3d'); adicionar(k === 'faixa' ? 'gabcirc' : 'gabgiro'); return; }
+  if (k === 'passeio') { if (viewMode === '2d') await setView('3d'); (await garantir3D()).setMode('passeio'); if (mobile()) { ferrAberto = false; atualizarLayout(); } return; }
+  if (k === 'uso' || k === 'sentar') {
+    if (viewMode === '2d') await setView('3d');
+    setUso(k === 'uso' ? { aberto: true } : { cadeiras: true, pessoas: true });
+    if (mobile()) { ferrAberto = false; atualizarLayout(); }
+    toast(k === 'uso' ? 'Portas e gavetas abertas. Para desligar, use “Simular uso”.' : 'Cadeiras puxadas e pessoas sentadas. Para desligar, use “Simular uso”.');
+  }
+});
+
+// ======================================================================== peças fixas (pia, tanque, louças, box, portas e janelas)
+iniciarPecas({
+  plan: () => plan,
+  focar: async (id) => {
+    const f = plan.fixos.find((x) => x.id === id); if (!f) return;
+    if (viewMode === '2d') await setView('3d');
+    (await garantir3D()).focar(f.x, f.y);
+    if (mobile()) { ferrAberto = false; atualizarLayout(); }
+  },
+});
+
 // ======================================================================== análise
 let tAnalise = null;
 function agendarAnalise(ms = 120) {
@@ -536,12 +717,18 @@ subscribe((kind) => {
   if (!plan || $('#editor').hidden) return;
   if (kind === 'itens') {
     plan2d.redrawItems();
-    view3d?.syncItems(store.projeto.itens);
+    view3d?.syncItems(store.projeto.itens); view3d?.syncEstados();
     const it = selected();
     if (it && inspUid === it.uid) atualizarInspItem(it); else renderInspetor();
     if (tool === 'luz') desenharLuz();
     agendarAnalise();
   }
+  if (kind === 'fixos') {
+    view3d?.refreshFixos(); plan2d.redrawFixos(); plan2d.redrawItems();
+    if (tool === 'fixos') renderPecas();
+    agendarAnalise();
+  }
+  if (kind === 'uso') { sincronizarUsoUI(); view3d?.syncEstados(); }
   if (kind === 'acab') {
     plan2d.redrawAcab();
     view3d?.refreshAcab();
@@ -633,6 +820,12 @@ function acao(a) {
   if (a === 'limpar') confirmar('Remover todos os móveis?', 'O apartamento ficará vazio. Você pode desfazer depois.', 'Remover', () => { edit((p) => { p.itens = []; }); select(null); tocar('excluir'); });
   if (a === 'original') confirmar('Restaurar os acabamentos originais?', 'Pisos, paredes, rodapés, forros e luzes voltam ao que a construtora entrega. Você pode desfazer depois.', 'Restaurar', () => { edit((p) => { p.acab = ACAB_VAZIO(); ajustarItensTeto(p); }, 'acab'); tocar('pintar'); });
   if (a === 'medidas') dialogoMedidas();
+  if (a === 'sobre') abrirDialogo(`<h2>Sobre este projeto</h2>
+    <p>O Simulador Park Espanha nasceu para ajudar quem vai morar no condomínio a imaginar o apartamento antes de receber as chaves. Ele usa as cotas das plantas de vendas e estimativas para o que a planta não traz.</p>
+    <p>Feito de forma independente e sem fins lucrativos, por Gabriel Schuchter. Não tem ligação oficial com a construtora, a incorporadora nem o condomínio.</p>
+    <p>Os projetos ficam salvos apenas neste navegador. Exporte o arquivo se quiser levar para outro aparelho.</p>
+    <p><b>Cores de tinta.</b> Os valores da Suvinil foram copiados das páginas oficiais de cada cor (RGB e código), consultadas em 20/10/2026. Os da Sherwin-Williams vêm do banco paintdb.com, que republica os dados da marca, e os nomes estão em inglês. A marcação “mais vendida” é citação da marca ou do varejo, não ranking auditado. Outras marcas, como a Coral, não entraram por falta de fonte com RGB acessível; use “Cor própria” para digitar qualquer hex. Tela não reproduz tinta: brilho, luz do ambiente e textura mudam a cor real, então confirme no leque físico.</p>
+    <div class="acoes-row"><button class="btn btn-pri" data-dlg-fechar>Fechar</button></div>`);
   if (a === 'atalhos') abrirDialogo(`<h2>Atalhos e controles</h2>
     <ul>
       <li><b>Planta:</b> arraste o fundo para mover a vista, role ou faça pinça para aproximar, toque duas vezes no fundo para enquadrar.</li>
@@ -641,7 +834,10 @@ function acao(a) {
       <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> refaz, <kbd>Ctrl</kbd>+<kbd>D</kbd> duplica, <kbd>Delete</kbd> exclui, <kbd>Esc</kbd> cancela a seleção.</li>
       <li><b>Paredes, Piso e Teto:</b> escolha uma amostra e clique na superfície. “Uma parede” pinta só a parede clicada, “Cômodo” pinta o ambiente e “Todos” aplica a todos, menos aos banheiros.</li>
       <li><b>Luz:</b> clique no interruptor na parede (3D) ou no botão de lâmpada na planta. A luz de verdade aparece em “Noite”.</li>
-      <li><b>Passeio 3D:</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou setas para andar, arraste para olhar, <kbd>Shift</kbd> para andar mais rápido. No celular, use o joystick.</li>
+      <li><b>Passeio 3D:</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou setas para andar, arraste para olhar, <kbd>Shift</kbd> para andar mais rápido, roda do mouse para aproximar a imagem. No celular, use o joystick (empurre até a borda para correr), arraste para olhar e use a pinça para aproximar.</li>
+      <li><b>Maquete 3D:</b> arraste para girar, roda do mouse ou pinça para aproximar até o ponto sob o cursor ou entre os dedos, botão direito ou dois dedos para deslocar. Duplo clique ou duplo toque aproxima do ponto; outro duplo clique volta ao enquadramento geral.</li>
+      <li><b>Colocar móvel olhando:</b> no Passeio, escolha um móvel no catálogo. Ele aparece na mira, verde se cabe e vermelho se sobrepõe. Olhe para o chão, uma parede, o teto ou o tampo de outro móvel. <kbd>Q</kbd>/<kbd>E</kbd> giram, <kbd>R</kbd>/<kbd>F</kbd> sobem e descem 5 cm, clique ou <kbd>Enter</kbd> coloca, <kbd>Esc</kbd> cancela. Com a mira num móvel, <kbd>E</kbd> pega para mover e <kbd>F</kbd> abre ou fecha.</li>
+      <li><b>Zoom no 3D:</b> botões + e − no canto da tela, e o botão do meio centraliza. A roda do mouse e a pinça também funcionam.</li>
     </ul><div class="acoes-row"><button class="btn btn-pri" data-dlg-fechar>Entendi</button></div>`);
 }
 
@@ -715,6 +911,6 @@ $('#home').hidden = false;
 // gancho de testes
 window.__pe = {
   store, Som, get plan() { return plan; }, get view3d() { return view3d; }, get plan2d() { return plan2d; },
-  setView, setTool, garantir3D, aplicar, analise: () => ultimaAnalise, adicionar, trocarPeriodo,
+  FIX_SCHEMA, AB_SCHEMA, setFixo, setAberturas, setView, setTool, garantir3D, aplicar, analise: () => ultimaAnalise, adicionar, trocarPeriodo,
   luzDe: (r) => luzDe(store.projeto.acab, r),
 };

@@ -249,7 +249,7 @@ export const DESENHOS = {
 export function miniaturaCanvas(def, px = 64) {
   const c = document.createElement('canvas'); c.width = c.height = px;
   const g = c.getContext('2d');
-  const s = 256; const big = document.createElement('canvas'); big.width = big.height = s;
+  const s = 128; const big = document.createElement('canvas'); big.width = big.height = s;
   const gg = big.getContext('2d');
   (DESENHOS[def.draw] || DESENHOS.cimento)(gg, s, def.args || {});
   g.drawImage(big, 0, 0, px, px);

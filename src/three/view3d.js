@@ -5,9 +5,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { wallInfo, wallPoint, rectCorners, pointInPoly, rad, deg, bbox, rayPolys, bordasComodo, roomAt, polyCentroid } from '../geom.js';
 import { catalogoPorId } from '../data/catalogo.js';
-import { buildFurniture, buildFixture, mat } from './furniture3d.js';
+import { buildFurniture, mat } from './furniture3d.js';
+import { buildFixture, vidro } from './fixos3d.js';
+import { opcoesDe, abDe } from '../data/fixos.js';
 import { texCeu, texAcab } from './textures.js';
-import { store, live, commit, select } from '../store.js';
+import { store, live, commit, select, estadoDe } from '../store.js';
+import { aplicarEstado } from './helpers3d.js';
 import { pisoDe, paredeDe, tetoDe, luzDe, rodapeDe, texParedePorId, tempPorId, COR_PAREDE_PADRAO } from '../data/acabamentos.js';
 import { construirForro, tetoY, tetoMin } from './teto.js';
 import { snapItem, colide } from '../snap.js';
@@ -25,6 +28,7 @@ export function createView3D(container, opts = {}) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.localClippingEnabled = true;
+  renderer.debug.checkShaderErrors = false; // evita parada síncrona a cada programa; erros reais aparecem no console do navegador
   container.appendChild(renderer.domElement);
   renderer.domElement.className = 'gl';
 
@@ -39,8 +43,20 @@ export function createView3D(container, opts = {}) {
   const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 400);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.09;
-  controls.maxPolarAngle = Math.PI * 0.47; controls.minDistance = 2; controls.maxDistance = 90;
+  controls.maxPolarAngle = Math.PI * 0.47; controls.minDistance = 0.7; controls.maxDistance = 90;
   controls.screenSpacePanning = true;
+  // zoom em direção ao ponto sob o cursor (roda) ou entre os dedos (pinça), em vez de ao centro da tela
+  controls.zoomToCursor = true; controls.zoomSpeed = 1.15; controls.panSpeed = 1;
+  // dois dedos: pinça aproxima e os dois arrastam juntos; um dedo gira
+  controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+  // dedo e mouse têm ritmos diferentes: no toque a rotação é um pouco mais lenta e desliza mais depois de soltar
+  const perfilEntrada = (tipo) => {
+    if (tipo === 'touch') { controls.rotateSpeed = 0.8; controls.dampingFactor = 0.07; }
+    else { controls.rotateSpeed = 1; controls.dampingFactor = 0.1; }
+  };
+  renderer.domElement.addEventListener('pointerdown', (ev) => perfilEntrada(ev.pointerType), { capture: true });
+  // Safari do iOS dá zoom na página com a pinça mesmo com touch-action: none
+  for (const n of ['gesturestart', 'gesturechange', 'gestureend']) renderer.domElement.addEventListener(n, (e) => e.preventDefault());
 
   const hemi = new THREE.HemisphereLight('#eef4ff', '#b8a990', 0.45); scene.add(hemi);
   const sol = new THREE.DirectionalLight('#fff3e0', 2.6);
@@ -148,12 +164,7 @@ export function createView3D(container, opts = {}) {
     laje.position.set((x0 + x1) / 2, -0.071, (y0 + y1) / 2); laje.receiveShadow = true; estrutura.add(laje);
     chao = new THREE.Mesh(new THREE.CircleGeometry(160, 48), new THREE.MeshStandardMaterial({ color: '#9aa58c', roughness: 1 }));
     chao.rotation.x = -Math.PI / 2; chao.position.set((x0 + x1) / 2, -18, (y0 + y1) / 2); estrutura.add(chao);
-    for (const o of plan.openings) wallGroups.get(o.wall).g.add(construirAbertura(o, H));
-    for (const f of plan.fixos) {
-      const g = buildFixture(f, H);
-      g.position.set(f.x, 0, f.y); g.rotation.y = -rad(f.rot || 0);
-      g.userData.fixo = f.id; estrutura.add(g);
-    }
+    construirAberturas(); construirFixos();
     const cx = (x0 + x1) / 2, cz = (y0 + y1) / 2, span = Math.max(x1 - x0, y1 - y0);
     sol.target.position.set(cx, 0, cz);
     const sc = sol.shadow.camera; sc.left = -span; sc.right = span; sc.top = span; sc.bottom = -span; sc.near = 1; sc.far = 60; sc.updateProjectionMatrix();
@@ -162,16 +173,42 @@ export function createView3D(container, opts = {}) {
     requestRender();
   }
 
-  function construirAbertura(o, H) {
+  // Peças fixas e aberturas se reconstroem sozinhas quando o usuário muda uma opção (sem refazer o apartamento inteiro).
+  let fixosG = [], aberturasG = [];
+  function descartar(g) { g.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); g.parent?.remove(g); }
+  function construirFixos() {
+    for (const g of fixosG) descartar(g);
+    fixosG = [];
+    const H = plan.tip.peDireito, fix = store.projeto?.fix;
+    for (const f of plan.fixos) {
+      f.oculto = !!fix?.[f.id]?.oculto;
+      const g = buildFixture(f, H, opcoesDe(fix, f));
+      g.position.set(f.x, 0, f.y); g.rotation.y = -rad(f.rot || 0);
+      g.userData.fixo = f.id; g.userData.fixoTipo = f.tipo;
+      g.traverse((o) => { o.userData.fixoId = f.id; });
+      g.userData.oculto = f.oculto; g.visible = !f.oculto && mode !== 'forro';
+      estrutura.add(g); fixosG.push(g);
+      if (g.userData.partes) aplicarEstado(g, estadoDe({}));
+    }
+  }
+  function construirAberturas() {
+    for (const g of aberturasG) descartar(g);
+    aberturasG = [];
+    const H = plan.tip.peDireito, ab = abDe(store.projeto?.fix);
+    for (const o of plan.openings) { const g = construirAbertura(o, H, ab); wallGroups.get(o.wall).g.add(g); aberturasG.push(g); }
+  }
+
+  function construirAbertura(o, H, ab = abDe(null)) {
     const g = new THREE.Group();
     const w = o.w, wi = wallInfo(w);
-    const alu = mat('laca', '#f2f2f0');
+    const alu = mat('laca', ab.esquadria);
+    const vid = vidro(ab.vidro);
     if (o.porta && !o.correr) {
       for (const s of [o.s0, o.s1]) { const j = boxWall(w, s - 0.02, s + 0.02, 0, o.altura + 0.03, mat('laca', '#f4f2ee'), w.t + 0.02); if (j) g.add(j); }
       const vt = boxWall(w, o.s0 - 0.02, o.s1 + 0.02, o.altura, o.altura + 0.04, mat('laca', '#f4f2ee'), w.t + 0.02); if (vt) g.add(vt);
       const so = boxWall(w, o.s0, o.s1, 0, 0.006, mat('granito'), w.t); if (so) g.add(so);
       const larg = o.largura - 0.03;
-      const folha = new THREE.Mesh(new THREE.BoxGeometry(larg, o.altura - 0.01, 0.035), o.entrada ? mat('madeira', '#6e4a31') : mat('laca', '#f6f4f0'));
+      const folha = new THREE.Mesh(new THREE.BoxGeometry(larg, o.altura - 0.01, 0.035), o.entrada ? mat('madeira', ab.entrada) : mat('laca', ab.porta));
       const dir = [o.open[0] - o.hinge[0], o.open[1] - o.hinge[1]];
       const L = Math.hypot(...dir), ux = dir[0] / L, uy = dir[1] / L;
       const cx = o.hinge[0] + ux * (larg / 2 + 0.02);
@@ -179,16 +216,16 @@ export function createView3D(container, opts = {}) {
       folha.position.set(cx + (o.dobradica === 'a' ? wi.ux : -wi.ux) * 0.02, (o.altura - 0.01) / 2, cy + (o.dobradica === 'a' ? wi.uy : -wi.uy) * 0.02);
       folha.rotation.y = -Math.atan2(uy, ux);
       folha.castShadow = true; folha.receiveShadow = true; g.add(folha);
-      const mac = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.02), mat('inox'));
+      const mac = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.02), new THREE.MeshStandardMaterial({ color: ab.macaneta, roughness: 0.25, metalness: 0.85 }));
       mac.position.set(folha.position.x + ux * (larg / 2 - 0.08), 1.05, folha.position.z + uy * (larg / 2 - 0.08));
       mac.position.x += -uy * 0.03 * (o.abre || 1); mac.rotation.y = folha.rotation.y; g.add(mac);
     } else if (o.correr) {
       const so = boxWall(w, o.s0, o.s1, 0, 0.006, mat('granito'), w.t); if (so) g.add(so);
       const meio = (o.s0 + o.s1) / 2;
       for (const [a, b, off] of [[o.s0, meio + 0.04, -0.025], [meio - 0.04 + 0.45, o.s1, 0.025]]) {
-        const vid = boxWall(w, a + 0.04, b - 0.04, 0.06, o.altura - 0.05, mat('vidro'), 0.008);
+        const vd = boxWall(w, a + 0.04, b - 0.04, 0.06, o.altura - 0.05, vid, 0.008);
         const fr = [boxWall(w, a, b, 0, 0.06, alu, 0.04), boxWall(w, a, b, o.altura - 0.05, o.altura, alu, 0.04), boxWall(w, a, a + 0.04, 0, o.altura, alu, 0.04), boxWall(w, b - 0.04, b, 0, o.altura, alu, 0.04)];
-        for (const m of [vid, ...fr]) if (m) { m.position.x += wi.nx * off; m.position.z += wi.ny * off; if (m === vid) m.castShadow = false; g.add(m); }
+        for (const m of [vd, ...fr]) if (m) { m.position.x += wi.nx * off; m.position.z += wi.ny * off; if (m === vd) m.castShadow = false; g.add(m); }
       }
     } else {
       const z0 = o.peitoril, z1 = o.peitoril + o.altura;
@@ -196,12 +233,12 @@ export function createView3D(container, opts = {}) {
       const fr = [boxWall(w, o.s0, o.s1, z0, z0 + 0.04, alu, 0.06), boxWall(w, o.s0, o.s1, z1 - 0.04, z1, alu, 0.06), boxWall(w, o.s0, o.s0 + 0.04, z0, z1, alu, 0.06), boxWall(w, o.s1 - 0.04, o.s1, z0, z1, alu, 0.06)];
       for (const m of fr) if (m) g.add(m);
       if (o.tipo === 'J1') {
-        const v = boxWall(w, o.s0 + 0.04, o.s1 - 0.04, z0 + 0.04, z1 - 0.04, new THREE.MeshStandardMaterial({ color: '#e7ecee', roughness: 0.3, transparent: true, opacity: 0.75 }), 0.006);
+        const v = boxWall(w, o.s0 + 0.04, o.s1 - 0.04, z0 + 0.04, z1 - 0.04, ab.vidro === 'incolor' ? new THREE.MeshStandardMaterial({ color: '#e7ecee', roughness: 0.3, transparent: true, opacity: 0.75 }) : vid, 0.006);
         if (v) { v.castShadow = false; g.add(v); }
       } else {
         const mid = (o.s0 + o.s1) / 2;
         for (const [a, b, off] of [[o.s0 + 0.04, mid + 0.03, -0.015], [mid - 0.03, o.s1 - 0.04, 0.015]]) {
-          const v = boxWall(w, a, b, z0 + 0.04, z1 - 0.04, mat('vidro'), 0.006);
+          const v = boxWall(w, a, b, z0 + 0.04, z1 - 0.04, vid, 0.006);
           const ms = boxWall(w, a, a + 0.03, z0 + 0.04, z1 - 0.04, alu, 0.03);
           for (const m of [v, ms]) if (m) { m.position.x += wi.nx * off; m.position.z += wi.ny * off; if (m === v) m.castShadow = false; g.add(m); }
         }
@@ -493,7 +530,8 @@ export function createView3D(container, opts = {}) {
     if (c?.teto) it.elev = Math.round((tetoY(plan, acab(), it.x, it.y) - it.h) * 1000) / 1000;
   }
   function animMontagem(g, uid) {
-    const base = g.children.map((c) => ({ c, p: c.position.clone(), r: c.rotation.clone() }));
+    const pes = new Set((g.userData.partes || []).filter((q) => q.def.grupo === 'pes').map((q) => q.o));
+    const base = g.children.filter((c) => !pes.has(c)).map((c) => ({ c, p: c.position.clone(), r: c.rotation.clone() }));
     const n = base.length; if (!n) return;
     let seed = [...uid].reduce((a, ch) => a + ch.charCodeAt(0), 7);
     const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
@@ -532,6 +570,7 @@ export function createView3D(container, opts = {}) {
         meshPorUid.set(it.uid, g); assinatura.set(it.uid, s);
         moveis.add(g);
         g.position.set(it.x, it.elev || 0, it.y); g.rotation.y = -rad(it.rot || 0);
+        if (g.userData.partes) { const al = alvoEstado(it); estAtual.set(it.uid, { ...al }); aplicarEstado(g, al); }
         if (novo) { store.novos.delete(it.uid); animMontagem(g, it.uid); }
       }
       g.position.set(it.x, it.elev || 0, it.y);
@@ -591,8 +630,10 @@ export function createView3D(container, opts = {}) {
   }
 
   // ------------------------------------------------------------ câmeras e modos
-  const walk = { yaw: 0, pitch: 0, pos: new THREE.Vector3(), mv: [0, 0], keys: new Set(), raio: 0.2, acum: 0 };
-  const EYE = 1.60;
+  const walk = { yaw: 0, pitch: 0, yawT: 0, pitchT: 0, vYaw: 0, vPitch: 0, pos: new THREE.Vector3(), mv: [0, 0], vf: 0, vs: 0, keys: new Set(), raio: 0.2, acum: 0, fase: 0, bob: 0 };
+  const olharJa = (yaw, pitch) => { walk.yaw = walk.yawT = yaw; walk.pitch = walk.pitchT = pitch; walk.vYaw = walk.vPitch = 0; };
+  // olhos de uma pessoa de ~1,72 m; passo de ~0,72 m a 1,4 m/s (caminhada normal)
+  const EYE = 1.62;
   let anim = null;
   function animarCamera(pos, alvo, ms = 650) {
     const p0 = camera.position.clone(), t0 = controls.target.clone(), start = performance.now();
@@ -611,7 +652,8 @@ export function createView3D(container, opts = {}) {
       g.visible = !forro || !!catalogoPorId[it?.tipo]?.teto;
     }
   }
-  let autoFit = true;
+  let autoFit = true, fovManual = false;
+  const fovAuto = () => (camera.aspect < 1 ? 84 : 64); // vertical; 64° ≈ 90° horizontal em 16:9, próximo do que jogos de primeira pessoa usam. Em retrato abre mais para não parecer um corredor estreito
   // distância da câmera (na direção dir) que enquadra a planta inteira, com margem, considerando a proporção do palco
   function distanciaEnquadrada(dir, c) {
     const tmp = new THREE.PerspectiveCamera(42, camera.aspect, 0.1, 500);
@@ -633,13 +675,13 @@ export function createView3D(container, opts = {}) {
     const forro = mode === 'forro';
     tetosG.visible = mode === 'passeio' || forro;
     if (laje) laje.visible = !forro; if (chao) chao.visible = !forro;
-    estrutura.children.forEach((o) => { if (o.userData.fixo) o.visible = !forro; });
+    estrutura.children.forEach((o) => { if (o.userData.fixo) o.visible = !forro && !o.userData.oculto; });
     pisosG.visible = !forro;
     aplicarVisibilidadeModo(); atualizarPontos();
     controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI * 0.47;
     if (mode === 'passeio') {
       controls.enabled = false; corte.constant = 99;
-      camera.fov = 72; camera.near = 0.05; camera.updateProjectionMatrix();
+      fovManual = false; camera.fov = fovAuto(); camera.near = 0.05; camera.updateProjectionMatrix();
       if (inicial || walk.pos.lengthSq() === 0) irPara(null);
       aplicarCamWalk();
     } else {
@@ -668,7 +710,7 @@ export function createView3D(container, opts = {}) {
     syncSel(); requestRender();
   }
   function aplicarCamWalk() {
-    camera.position.set(walk.pos.x, EYE, walk.pos.z);
+    camera.position.set(walk.pos.x, EYE + walk.bob, walk.pos.z);
     const dir = new THREE.Vector3(Math.sin(walk.yaw) * Math.cos(walk.pitch), Math.sin(walk.pitch), -Math.cos(walk.yaw) * Math.cos(walk.pitch));
     camera.lookAt(camera.position.clone().add(dir));
     dirty = true;
@@ -685,6 +727,7 @@ export function createView3D(container, opts = {}) {
   }
   function irPara(roomId) {
     let x, z, lx, lz;
+    if (roomId && !plan.rooms.some((q) => q.id === roomId)) roomId = null;
     if (!roomId) { [x, z] = plan.tip.pontos.inicio; [lx, lz] = plan.tip.pontos.olhar; }
     else {
       const r = plan.rooms.find((q) => q.id === roomId);
@@ -717,7 +760,7 @@ export function createView3D(container, opts = {}) {
       [lx, lz] = far;
     }
     walk.pos.set(x, EYE, z);
-    walk.yaw = Math.atan2(lx - x, -(lz - z)); walk.pitch = -0.08;
+    olharJa(Math.atan2(lx - x, -(lz - z)), -0.08);
     resolverColisao();
     aplicarCamWalk(); atualizarPool();
   }
@@ -725,7 +768,7 @@ export function createView3D(container, opts = {}) {
   function obstaculos() {
     const L = [];
     for (const p of plan.pieces) if (!p.verga && p.z0 < 1.0) L.push(p.poly);
-    for (const f of plan.fixos) if (f.h > 0.3) L.push(f.poly);
+    for (const f of plan.fixos) if (f.h > 0.3 && !f.oculto) L.push(f.poly);
     const ent = plan.openings.find((o) => o.entrada); if (ent) L.push(ent.poly);
     for (const it of store.projeto.itens) if (!catalogoPorId[it.tipo]?.livre && it.elev < 1.0 && it.h > 0.25) L.push(rectCorners(it));
     return L;
@@ -754,35 +797,72 @@ export function createView3D(container, opts = {}) {
       }
     }
   }
+  const VEL_ANDAR = 1.4, VEL_CORRER = 2.65;
   function passoWalk(dt) {
-    let f = walk.mv[1], s = walk.mv[0];
+    // olhar: o alvo (yawT/pitchT) vem do dedo ou do mouse; a câmera o persegue com suavização exponencial.
+    // Depois que o dedo sai, a velocidade angular restante decai (inércia).
     const k = walk.keys;
-    if (k.has('KeyW') || k.has('ArrowUp')) f += 1;
-    if (k.has('KeyS') || k.has('ArrowDown')) f -= 1;
-    if (k.has('KeyA')) s -= 1;
-    if (k.has('KeyD')) s += 1;
-    if (k.has('ArrowLeft')) walk.yaw -= dt * 1.8;
-    if (k.has('ArrowRight')) walk.yaw += dt * 1.8;
-    const mag = Math.hypot(f, s);
-    if (mag > 0.01 || k.has('ArrowLeft') || k.has('ArrowRight')) {
-      const corre = k.has('ShiftLeft');
-      const vel = 1.35 * (corre ? 1.7 : 1) * Math.min(1, mag || 0);
-      if (mag > 0.01) {
-        const x0 = walk.pos.x, z0 = walk.pos.z;
-        const fx = Math.sin(walk.yaw), fz = -Math.cos(walk.yaw);
-        walk.pos.x += ((fx * f + -fz * s) / Math.max(1, mag)) * vel * dt;
-        walk.pos.z += ((fz * f + fx * s) / Math.max(1, mag)) * vel * dt;
-        resolverColisao();
-        walk.acum += Math.hypot(walk.pos.x - x0, walk.pos.z - z0);
-        const passo = corre ? 0.78 : 0.62;
-        if (walk.acum >= passo) {
-          walk.acum = 0;
-          const r = roomAt(plan, walk.pos.x, walk.pos.z);
-          if (r) opts.onPasso?.({ room: r, piso: pisoDe(acab(), r), corre });
-        }
+    if (k.has('ArrowLeft')) walk.yawT -= dt * 1.8;
+    if (k.has('ArrowRight')) walk.yawT += dt * 1.8;
+    if (walk.vYaw || walk.vPitch) {
+      walk.yawT += walk.vYaw * dt; walk.pitchT = Math.max(-1.25, Math.min(1.25, walk.pitchT + walk.vPitch * dt));
+      const dec = Math.exp(-dt * 4.2); walk.vYaw *= dec; walk.vPitch *= dec;
+      if (Math.abs(walk.vYaw) < 0.02 && Math.abs(walk.vPitch) < 0.02) walk.vYaw = walk.vPitch = 0;
+    }
+    let girou = false;
+    const dy = walk.yawT - walk.yaw, dp = walk.pitchT - walk.pitch;
+    if (Math.abs(dy) > 1e-4 || Math.abs(dp) > 1e-4) {
+      const a = 1 - Math.exp(-dt * 30);
+      walk.yaw += dy * a; walk.pitch += dp * a;
+      if (Math.abs(walk.yawT - walk.yaw) < 1e-4) walk.yaw = walk.yawT;
+      if (Math.abs(walk.pitchT - walk.pitch) < 1e-4) walk.pitch = walk.pitchT;
+      girou = true;
+    }
+
+    // andar: a velocidade sobe e desce com suavização, sem arranque nem parada seca.
+    // Joystick: zona morta tratada no próprio joystick; aqui só a curva de resposta (fina perto do centro).
+    let f = k.has('KeyW') || k.has('ArrowUp') ? 1 : 0; if (k.has('KeyS') || k.has('ArrowDown')) f -= 1;
+    let s = k.has('KeyD') ? 1 : 0; if (k.has('KeyA')) s -= 1;
+    let alvoF = 0, alvoS = 0;
+    const teclas = Math.hypot(f, s);
+    if (teclas > 0) {
+      const vel = k.has('ShiftLeft') ? VEL_CORRER : VEL_ANDAR;
+      alvoF = (f / teclas) * vel; alvoS = (s / teclas) * vel;
+    } else {
+      const jm = Math.hypot(walk.mv[0], walk.mv[1]);
+      if (jm > 0.001) {
+        const m = Math.min(1, jm), curva = Math.pow(m, 1.35);
+        const vel = VEL_ANDAR * curva * (1 + (VEL_CORRER / VEL_ANDAR - 1) * Math.max(0, (m - 0.9) / 0.1));
+        alvoF = (walk.mv[1] / jm) * vel; alvoS = (walk.mv[0] / jm) * vel;
+      }
+    }
+    const kAcel = (Math.hypot(alvoF, alvoS) > Math.hypot(walk.vf, walk.vs) ? 9 : 13);
+    const t = 1 - Math.exp(-dt * kAcel);
+    walk.vf += (alvoF - walk.vf) * t; walk.vs += (alvoS - walk.vs) * t;
+    const vm = Math.hypot(walk.vf, walk.vs);
+    if (vm < 0.02 && alvoF === 0 && alvoS === 0) walk.vf = walk.vs = 0;
+
+    if (vm >= 0.02) {
+      const corre = vm > VEL_ANDAR * 1.25;
+      const x0 = walk.pos.x, z0 = walk.pos.z;
+      const fx = Math.sin(walk.yaw), fz = -Math.cos(walk.yaw);
+      walk.pos.x += (fx * walk.vf - fz * walk.vs) * dt;
+      walk.pos.z += (fz * walk.vf + fx * walk.vs) * dt;
+      resolverColisao();
+      const dpos = Math.hypot(walk.pos.x - x0, walk.pos.z - z0);
+      walk.acum += dpos;
+      const passo = corre ? 0.95 : 0.72;
+      walk.fase += (dpos / passo) * Math.PI;
+      const amp = Math.min(1, vm / VEL_ANDAR);
+      walk.bob = (Math.abs(Math.sin(walk.fase)) - 0.55) * (corre ? 0.034 : 0.022) * amp;
+      if (walk.acum >= passo) {
+        walk.acum = 0;
+        const r = roomAt(plan, walk.pos.x, walk.pos.z);
+        if (r) opts.onPasso?.({ room: r, piso: pisoDe(acab(), r), corre });
       }
       aplicarCamWalk();
-    }
+    } else if (Math.abs(walk.bob) > 0.0004) { walk.bob *= Math.max(0, 1 - dt * 9); aplicarCamWalk(); }
+    else if (girou) aplicarCamWalk();
   }
 
   // ------------------------------------------------------------ recorte inteligente das paredes
@@ -808,6 +888,7 @@ export function createView3D(container, opts = {}) {
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   const planoPiso = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   let drag = null, down = null, hoverInfo = null, hoverKey = '', hoverPend = null;
+  const ptrs = new Map(); let pinca = null, ultimoToque = null;
   const el = renderer.domElement;
   function apontar(ev) {
     const r = el.getBoundingClientRect();
@@ -909,8 +990,20 @@ export function createView3D(container, opts = {}) {
   }
 
   el.addEventListener('pointerdown', (ev) => {
-    down = { x: ev.clientX, y: ev.clientY, t: performance.now(), yaw: walk.yaw, pitch: walk.pitch, id: ev.pointerId };
-    if (mode === 'passeio') { el.setPointerCapture(ev.pointerId); return; }
+    if (mode === 'passeio') {
+      ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      el.setPointerCapture(ev.pointerId);
+      walk.vYaw = walk.vPitch = 0; // tocar na tela para a inércia
+      if (ptrs.size === 2) { // pinça: muda o campo de visão (zoom); sai do modo de olhar até soltar todos os dedos
+        const [a, b] = [...ptrs.values()];
+        pinca = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, fov0: camera.fov };
+        down = null; return;
+      }
+      if (ptrs.size > 2 || pinca) return;
+      down = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, id: ev.pointerId, lx: ev.clientX, ly: ev.clientY, lt: ev.timeStamp, moveu: false };
+      return;
+    }
+    down = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, id: ev.pointerId };
     if (mode === 'forro' || ev.button !== 0) return;
     if (superficieDaFerramenta()) return;
     if (pickGizmo(ev)) {
@@ -927,11 +1020,29 @@ export function createView3D(container, opts = {}) {
     }
   });
   el.addEventListener('pointermove', (ev) => {
-    if (mode === 'passeio' && down && down.id === ev.pointerId && Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 4) {
-      const k = ev.pointerType === 'touch' ? 0.006 : 0.0042;
-      walk.yaw = down.yaw + (ev.clientX - down.x) * k;
-      walk.pitch = Math.max(-1.1, Math.min(1.1, down.pitch - (ev.clientY - down.y) * k));
-      aplicarCamWalk(); return;
+    if (mode === 'passeio') {
+      if (ptrs.has(ev.pointerId)) ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (pinca && ptrs.size >= 2) {
+        const [a, b] = [...ptrs.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        fovManual = true; camera.fov = Math.max(40, Math.min(95, pinca.fov0 * (pinca.d0 / d)));
+        camera.updateProjectionMatrix(); dirty = true; return;
+      }
+      if (down && down.id === ev.pointerId) {
+        if (!down.moveu && Math.hypot(ev.clientX - down.x, ev.clientY - down.y) <= 4) return;
+        // incremental, sem salto ao passar da folga de 4 px. Sensibilidade proporcional ao campo de visão:
+        // 1 px de arrasto desloca a mesma fração da imagem em qualquer tela e em qualquer zoom.
+        const rect = el.getBoundingClientRect();
+        const rad_px = (rad(camera.fov) / Math.max(200, rect.height)) * (ev.pointerType === 'touch' ? 1.15 : 0.85);
+        const ini = down.moveu ? [down.lx, down.ly] : [down.x, down.y];
+        const ddx = (ev.clientX - ini[0]) * rad_px, ddy = (ev.clientY - ini[1]) * rad_px;
+        down.moveu = true;
+        walk.yawT += ddx; walk.pitchT = Math.max(-1.25, Math.min(1.25, walk.pitchT - ddy));
+        const agora = ev.timeStamp, dtm = Math.max(8, agora - down.lt) / 1000;
+        down.vy = (down.vy ?? 0) * 0.6 + (ddx / dtm) * 0.4; down.vp = (down.vp ?? 0) * 0.6 + (-ddy / dtm) * 0.4;
+        down.lx = ev.clientX; down.ly = ev.clientY; down.lt = agora;
+        dirty = true; return;
+      }
     }
     if (drag) {
       const it = store.projeto.itens.find((i) => i.uid === drag.uid); if (!it) return;
@@ -983,11 +1094,32 @@ export function createView3D(container, opts = {}) {
       opts.onHover?.(null);
     }
   }
+  // duplo clique ou duplo toque: aproxima do ponto tocado; se já está perto, volta ao enquadramento geral
+  function focarEm(ev, h) {
+    if (mode === 'forro') return;
+    const off = camera.position.clone().sub(controls.target), dist = off.length();
+    if (dist < 3.4) { aplicarModo(); return; }
+    const p = h?.point?.clone() || pontoPiso(ev, 0); if (!p) return;
+    autoFit = false;
+    const nd = Math.max(2.2, dist * 0.45);
+    animarCamera(p.clone().addScaledVector(off.normalize(), nd), p, 480);
+  }
   const up = (ev) => {
-    const tap = down && Math.hypot(ev.clientX - down.x, ev.clientY - down.y) < 6 && performance.now() - down.t < 450;
+    if (mode === 'passeio') {
+      ptrs.delete(ev.pointerId);
+      if (pinca) { if (ptrs.size === 0) pinca = null; down = null; return; }
+      // inércia só no toque, e só se o dedo ainda estava em movimento ao soltar
+      if (down && down.moveu && ev.pointerType === 'touch' && ev.timeStamp - down.lt < 110) {
+        const lim = 4;
+        walk.vYaw = Math.max(-lim, Math.min(lim, down.vy || 0)); walk.vPitch = Math.max(-lim, Math.min(lim, down.vp || 0));
+      }
+    }
+    const tap = down && Math.hypot(ev.clientX - down.x, ev.clientY - down.y) < 6 && ev.timeStamp - down.t < 450;
     if (drag) {
       const d = drag; drag = null; commit(); controls.enabled = mode !== 'passeio';
       if (d.kind === 'rot' || d.moved) opts.onSoltar?.(d.kind, store.projeto.itens.find((i) => i.uid === d.uid));
+    } else if (tap && carry.ativo) {
+      if (ev.pointerType === 'mouse') confirmarCarry();
     } else if (tap) {
       const sw = pickInterruptor(ev);
       if (sw) opts.onInterruptor?.(sw);
@@ -996,22 +1128,40 @@ export function createView3D(container, opts = {}) {
         if (info) { mostrarHover(info); opts.onSuperficie?.(info, { escopo }); }
       } else {
         const h = mode === 'forro' ? null : pickItem(ev);
-        if (h) select(h.object.userData.uid);
+        const agora = ev.timeStamp;
+        const duplo = mode !== 'passeio' && ultimoToque && agora - ultimoToque.t < 320 && Math.hypot(ev.clientX - ultimoToque.x, ev.clientY - ultimoToque.y) < 26;
+        ultimoToque = mode !== 'passeio' ? { t: agora, x: ev.clientX, y: ev.clientY } : null;
+        if (duplo) { ultimoToque = null; focarEm(ev, h); }
+        else if (h) select(h.object.userData.uid);
         else if (mode !== 'passeio') select(null);
       }
     }
     down = null;
   };
   el.addEventListener('pointerup', up);
-  el.addEventListener('pointercancel', () => { if (drag) commit(); drag = null; down = null; controls.enabled = mode !== 'passeio'; });
+  el.addEventListener('pointercancel', (ev) => { ptrs.delete(ev.pointerId); if (!ptrs.size) pinca = null; if (drag) commit(); drag = null; down = null; controls.enabled = mode !== 'passeio'; });
   el.addEventListener('pointerleave', () => { if (!drag) { mostrarHover(null); opts.onHover?.(null); } });
-  el.addEventListener('wheel', (ev) => { if (mode === 'passeio') { ev.preventDefault(); camera.fov = Math.max(45, Math.min(90, camera.fov + ev.deltaY * 0.03)); camera.updateProjectionMatrix(); dirty = true; } }, { passive: false });
+  el.addEventListener('wheel', (ev) => { if (mode === 'passeio' && carry.ativo) { ev.preventDefault(); girarCarry(ev.deltaY > 0 ? 15 : -15); return; } if (mode === 'passeio') { ev.preventDefault(); fovManual = true; camera.fov = Math.max(45, Math.min(95, camera.fov + ev.deltaY * 0.03)); camera.updateProjectionMatrix(); dirty = true; } }, { passive: false });
   controls.addEventListener('change', requestRender);
   controls.addEventListener('start', () => { autoFit = false; });
 
   const onKey = (isDown) => (ev) => {
     if (mode !== 'passeio' || !visivel) return;
     if (ev.target.closest && ev.target.closest('input,textarea,select')) return;
+    if (isDown && !ev.ctrlKey && !ev.metaKey) {
+      if (carry.ativo) {
+        const k = ev.code, big = ev.shiftKey ? 90 : 15;
+        if (k === 'KeyQ') { girarCarry(-big); ev.preventDefault(); return; }
+        if (k === 'KeyE') { girarCarry(big); ev.preventDefault(); return; }
+        if (k === 'KeyR') { alturaCarry(ev.shiftKey ? 20 : 5); ev.preventDefault(); return; }
+        if (k === 'KeyF') { alturaCarry(ev.shiftKey ? -20 : -5); ev.preventDefault(); return; }
+        if (k === 'Enter' || k === 'Space') { confirmarCarry(); ev.preventDefault(); return; }
+        if (k === 'Escape') { cancelarCarry(); ev.preventDefault(); return; }
+      } else if (mira.uid && !ev.repeat) {
+        if (ev.code === 'KeyE') { opts.onMiraAcao?.('pegar', mira.uid); ev.preventDefault(); return; }
+        if (ev.code === 'KeyF') { opts.onMiraAcao?.('abrir', mira.uid); ev.preventDefault(); return; }
+      }
+    }
     if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft'].includes(ev.code)) {
       ev.preventDefault();
       if (isDown) walk.keys.add(ev.code); else walk.keys.delete(ev.code);
@@ -1021,16 +1171,208 @@ export function createView3D(container, opts = {}) {
   window.addEventListener('keydown', kd); window.addEventListener('keyup', ku);
   window.addEventListener('blur', () => walk.keys.clear());
 
+  // ------------------------------------------------------------ estados: portas, gavetas, cadeiras puxadas e pessoas
+  const estAtual = new Map();
+  let estAnimando = false;
+  const alvoEstado = (it) => estadoDe(it || {});
+  function estadosDoItem(uid) {
+    const r = { portas: false, cad: false, pes: false };
+    for (const p of meshPorUid.get(uid)?.userData.partes || []) r[p.def.grupo] = true;
+    return r;
+  }
+  function syncEstados(imediato = false) {
+    for (const it of store.projeto.itens) {
+      const g = meshPorUid.get(it.uid); if (!g?.userData.partes) continue;
+      const alvo = alvoEstado(it), at = estAtual.get(it.uid);
+      if (imediato || !at) { estAtual.set(it.uid, { ...alvo }); aplicarEstado(g, alvo); continue; }
+      if (at.pes !== alvo.pes) { at.pes = alvo.pes; aplicarEstado(g, at); }
+      if (at.portas !== alvo.portas || at.cad !== alvo.cad) estAnimando = true;
+    }
+    dirty = true;
+  }
+  function animEstados(dt) {
+    let mexeu = false;
+    const passo = dt * 2.4;
+    for (const it of store.projeto.itens) {
+      const at = estAtual.get(it.uid), g = meshPorUid.get(it.uid); if (!at || !g) continue;
+      const alvo = alvoEstado(it); let ch = false;
+      for (const k of ['portas', 'cad']) {
+        if (at[k] === alvo[k]) continue;
+        const d = alvo[k] - at[k]; at[k] = Math.abs(d) <= passo ? alvo[k] : at[k] + Math.sign(d) * passo; ch = true;
+      }
+      if (ch) { aplicarEstado(g, at); mexeu = true; }
+    }
+    if (!mexeu) estAnimando = false;
+    dirty = true;
+  }
+
+  // ------------------------------------------------------------ carregar móvel em primeira pessoa (modo passeio)
+  const rayM = new THREE.Raycaster();
+  const carry = { ativo: false, it: null, existente: false, ghost: null, mats: [], elevManual: null, rotManual: 0, valido: true, ultimo: '' };
+  let mira = { uid: null, t: 0 };
+  function limparGhost() {
+    if (carry.ghost) { scene.remove(carry.ghost); carry.ghost = null; }
+    carry.mats = [];
+  }
+  function criarGhost(it) {
+    const g = buildFurniture(it, catalogoPorId[it.tipo]);
+    aplicarEstado(g, { portas: 0, cad: 0, pes: 0 });
+    g.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = false;
+      const dupl = (m) => { const c = m.clone(); c.transparent = true; c.opacity = Math.min(c.opacity ?? 1, 0.62); c.depthWrite = false; carry.mats.push(c); return c; };
+      o.material = Array.isArray(o.material) ? o.material.map(dupl) : dupl(o.material);
+    });
+    scene.add(g);
+    return g;
+  }
+  function tingir(ok) {
+    for (const m of carry.mats) if (m.emissive) { m.emissive.set(ok ? '#1c8a4c' : '#c0261d'); m.emissiveIntensity = 0.55; }
+  }
+  function infoCarry() {
+    const it = carry.it;
+    return carry.ativo ? { nome: it.nome, elevCm: Math.round((it.elev || 0) * 100), valido: carry.valido, existente: carry.existente, teto: !!catalogoPorId[it.tipo]?.teto } : null;
+  }
+  function carregar(it, existente = false) {
+    if (mode !== 'passeio' || !plan) return false;
+    cancelarCarry(true);
+    carry.it = { ...it }; carry.existente = existente; carry.elevManual = null; carry.rotManual = 0; carry.ativo = true;
+    if (!existente) carry.it.rot = (Math.round(deg(walk.yaw) / 90) * 90 % 360 + 360) % 360;
+    if (existente) { const g = meshPorUid.get(it.uid); if (g) g.visible = false; }
+    carry.ghost = criarGhost(carry.it);
+    carry.ultimo = '';
+    atualizarCarry(true);
+    opts.onCarry?.(infoCarry());
+    return true;
+  }
+  function cancelarCarry(silencioso = false) {
+    if (!carry.ativo) return;
+    if (carry.existente) { const g = meshPorUid.get(carry.it.uid); if (g) g.visible = true; }
+    carry.ativo = false; limparGhost(); carry.it = null;
+    if (!silencioso) opts.onCarry?.(null);
+    dirty = true;
+  }
+  function confirmarCarry() {
+    if (!carry.ativo) return false;
+    if (carry.vazio) { opts.onCarryVazio?.(); return false; }
+    const it = carry.it, existente = carry.existente;
+    carry.ativo = false; limparGhost();
+    if (existente) { const g = meshPorUid.get(it.uid); if (g) g.visible = true; }
+    carry.it = null;
+    opts.onCarry?.(null);
+    opts.onCarryFim?.({ it, existente });
+    dirty = true;
+    return true;
+  }
+  const alvosMira = () => [...pisoMeshes, ...caixasParede, ...tetoMeshes, ...moveis.children.filter((g) => g.visible)];
+  function atualizarCarry(forcar = false) {
+    if (!carry.ativo) return;
+    const it = carry.it, c = catalogoPorId[it.tipo], H = plan.tip.peDireito;
+    camera.updateMatrixWorld(); rayM.setFromCamera(new THREE.Vector2(0, 0), camera); rayM.far = c?.teto ? 4.5 : 5;
+    const hits = rayM.intersectObjects(alvosMira(), true);
+    const outros = store.projeto.itens.filter((i) => i.uid !== it.uid);
+    let x = it.x, z = it.y, elev = it.elev || 0, rot = it.rot || 0, tipo = 'piso';
+    // lateral de outro móvel não serve de apoio: usa o que está atrás (parede ou piso)
+    const normalDe = (q) => (q.face ? q.face.normal.clone().transformDirection(q.object.matrixWorld) : new THREE.Vector3(0, 1, 0));
+    const h = hits.find((q) => !(q.object.userData.uid && Math.abs(normalDe(q).y) <= 0.6));
+    if (h) {
+      const n = normalDe(h);
+      const obj = h.object, sup = obj.userData.surface, fur = obj.userData.uid;
+      const pt = h.point;
+      if (sup === 'teto' || (c?.teto && n.y < -0.5)) { tipo = 'teto'; x = pt.x; z = pt.z; }
+      else if (fur && n.y > 0.6 && !c?.teto) { tipo = 'sobre'; x = pt.x; z = pt.z; elev = Math.round(pt.y * 100) / 100; }
+      else if (Math.abs(n.y) < 0.4 && !fur) {
+        // parede
+        const nx = n.x, nz = n.z, l = Math.hypot(nx, nz) || 1;
+        tipo = 'parede';
+        const prof = c?.parede ? it.d : Math.max(it.w, it.d);
+        x = pt.x + (nx / l) * (prof / 2 + 0.005); z = pt.z + (nz / l) * (prof / 2 + 0.005);
+        if (c?.parede) rot = ((Math.round(deg(Math.atan2(-nx, nz)) * 10) / 10) % 360 + 360) % 360;
+        if (c?.parede && !c.teto && carry.elevManual == null) elev = Math.max(0, Math.min(H - it.h - 0.05, Math.round((pt.y - it.h / 2) * 20) / 20));
+        if (c?.parede && c.elev && c.elev > 0 && carry.elevManual == null && elev < c.elev * 0.5) elev = c.elev;
+      } else if (!fur || n.y > 0.6) { x = pt.x; z = pt.z; }
+    } else {
+      // nada sob a mira (janela aberta, varanda): o fantasma flutua à frente, em vermelho, para indicar que não há onde apoiar
+      tipo = 'vazio';
+      const dirF = new THREE.Vector3(); camera.getWorldDirection(dirF); dirF.y = 0; dirF.normalize();
+      x = camera.position.x + dirF.x * 1.8; z = camera.position.z + dirF.z * 1.8; elev = 0;
+    }
+    if (tipo !== 'parede') rot = ((it.rot || 0) % 360 + 360) % 360;
+    it.x = x; it.y = z;
+    if (tipo !== 'parede' || !c?.parede) it.rot = rot; else it.rot = rot;
+    if (tipo === 'piso' || tipo === 'parede') {
+      if (tipo === 'piso') snapItem(plan, outros, it, false);
+      if (carry.elevManual != null) elev = carry.elevManual;
+      else if (tipo === 'piso') elev = c?.parede ? (c?.elev || 0) : 0;
+    } else if (carry.elevManual != null) elev = (tipo === 'sobre' ? elev : 0) + carry.elevManual;
+    it.elev = Math.max(0, Math.min(2.6, elev));
+    if (c?.teto) aplicarTetoItem(it);
+    const ok = tipo !== 'vazio' && !colide(plan, it, outros);
+    const sig = [it.x.toFixed(3), it.y.toFixed(3), it.elev.toFixed(3), it.rot.toFixed(1), ok, tipo].join('|');
+    if (sig === carry.ultimo && !forcar) return;
+    carry.ultimo = sig; carry.valido = ok; carry.vazio = tipo === 'vazio';
+    const g = carry.ghost; g.position.set(it.x, it.elev || 0, it.y); g.rotation.y = -rad(it.rot || 0);
+    tingir(ok); dirty = true;
+    opts.onCarry?.(infoCarry());
+  }
+  function girarCarry(graus) { if (!carry.ativo) return; carry.it.rot = (((carry.it.rot || 0) + graus) % 360 + 360) % 360; carry.ultimo = ''; atualizarCarry(true); }
+  function alturaCarry(dcm) {
+    if (!carry.ativo) return;
+    const c = catalogoPorId[carry.it.tipo]; if (c?.teto) return;
+    carry.elevManual = Math.max(0, Math.min(2.4, Math.round(((carry.elevManual ?? carry.it.elev ?? 0) * 100 + dcm)) / 100));
+    carry.ultimo = ''; atualizarCarry(true);
+  }
+  // o que está sob a mira (para pegar, abrir ou fechar)
+  function atualizarMira(now) {
+    if (mode !== 'passeio' || carry.ativo) { if (mira.uid) { mira.uid = null; opts.onMira?.(null); } return; }
+    if (now - mira.t < 110) return; mira.t = now;
+    rayM.setFromCamera(new THREE.Vector2(0, 0), camera); rayM.far = 3.4;
+    const h = rayM.intersectObjects(moveis.children.filter((g) => g.visible), true).find((q) => q.object.userData.uid);
+    const uid = h ? h.object.userData.uid : null;
+    if (uid === mira.uid) return;
+    mira.uid = uid;
+    if (!uid) { opts.onMira?.(null); return; }
+    const it = store.projeto.itens.find((i) => i.uid === uid);
+    opts.onMira?.(it ? { uid, nome: it.nome, estados: estadosDoItem(uid), livre: !!catalogoPorId[it.tipo]?.teto } : null);
+  }
+
   // ------------------------------------------------------------ laço
   function resize() {
     const w = container.clientWidth, h = container.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
-    camera.aspect = w / h; camera.updateProjectionMatrix(); dirty = true;
+    camera.aspect = w / h;
+    if (mode === 'passeio' && !fovManual) camera.fov = fovAuto();
+    camera.updateProjectionMatrix(); dirty = true;
     if (plan && (!enquadrado || autoFit) && mode !== 'passeio') { enquadrado = true; aplicarModo(true); }
   }
   const ro = new ResizeObserver(resize); ro.observe(container);
   let last = performance.now(), raf = 0, tPool = 0;
+  let primeiroFrame = null, lastRenderTs = 0;
+  const prontoP = new Promise((res) => { primeiroFrame = res; });
+  // qualidade adaptativa: se o aparelho não acompanha, reduz resolução e sombras
+  const perf = { n: 0, soma: 0, nivel: 0 };
+  function medirFrame(dt) {
+    if (dt > 0.5) return;
+    perf.n++; perf.soma += dt;
+    if (perf.n >= 60) {
+      const media = perf.soma / perf.n; perf.n = 0; perf.soma = 0;
+      if (media > 0.034 && perf.nivel < 2) {
+        perf.nivel++;
+        if (perf.nivel === 1) { renderer.setPixelRatio(1); resize(); }
+        else { renderer.shadowMap.enabled = false; scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; }); sol.castShadow = false; dirty = true; }
+        opts.onQualidade?.(perf.nivel);
+      }
+    }
+  }
+  // o zoom até o cursor move o alvo; este limite impede que a câmera se perca longe da planta
+  function limitarAlvo() {
+    const t = controls.target, { x0, y0, x1, y1 } = plan.bb, m = 3.5, H = plan.tip.peDireito;
+    const nx = Math.max(x0 - m, Math.min(x1 + m, t.x)), nz = Math.max(y0 - m, Math.min(y1 + m, t.z)), ny = Math.max(0, Math.min(H + 1, t.y));
+    if (nx === t.x && nz === t.z && ny === t.y) return;
+    const d = new THREE.Vector3(nx - t.x, ny - t.y, nz - t.z);
+    t.add(d); camera.position.add(d); dirty = true;
+  }
   function loop(now) {
     raf = requestAnimationFrame(loop);
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
@@ -1043,24 +1385,41 @@ export function createView3D(container, opts = {}) {
       dirty = true;
     }
     if (mode === 'passeio') passoWalk(dt);
-    else if (controls.update()) dirty = true;
+    else { if (controls.update()) dirty = true; limitarAlvo(); }
+    if (estAnimando) animEstados(dt);
+    if (carry.ativo) atualizarCarry();
+    atualizarMira(now);
     atualizarRecorte(dt, false);
     if (hoverPend) processarHover();
     const foco = mode === 'passeio' ? walk.pos : controls.target;
     if (now - tPool > 220 && foco.distanceTo(focoAnterior) > 0.35) { tPool = now; atualizarPool(); }
-    if (dirty) { renderer.render(scene, camera); dirty = false; atualizarSelTela(); }
+    if (dirty) { renderer.render(scene, camera); dirty = false; atualizarSelTela(); if (primeiroFrame) { primeiroFrame(); primeiroFrame = null; } if (now - lastRenderTs < 90) medirFrame(now - lastRenderTs); lastRenderTs = now; }
   }
   raf = requestAnimationFrame(loop);
 
   return {
     setPlan(p) {
-      plan = p; enquadrado = false; meshPorUid.forEach((g) => moveis.remove(g)); meshPorUid.clear(); assinatura.clear(); walk.pos.set(0, 0, 0);
+      cancelarCarry(true); plan = p; enquadrado = false; meshPorUid.forEach((g) => moveis.remove(g)); meshPorUid.clear(); assinatura.clear(); walk.pos.set(0, 0, 0);
       construirArquitetura(); atualizarRecorte(0, true);
     },
     syncItems, syncSel,
     refreshAcab() { if (!plan) return; construirPisos(); construirPeles(); construirTetos(); atualizarPontos(); aplicarEmissivos(); atualizarPool(); atualizarRecorte(0, true); if (hoverInfo && ultimoHover && superficieDaFerramenta()) opts.onHover?.(textoHover(hoverInfo), ultimoHover[0], ultimoHover[1]); },
+    refreshFixos() { if (!plan) return; construirFixos(); construirAberturas(); aplicarVisibilidadeModo?.(); requestRender(); },
+    focar(x, z) {
+      if (mode === 'passeio') {
+        const r = plan.rooms.find((q) => pointInPoly(x, z, q.poly)), c = r ? r.centro : [x, z + 1];
+        let dx = c[0] - x, dz = c[1] - z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+        const d = Math.min(1.5, Math.max(0.8, l * 0.8));
+        walk.pos.set(x + dx * d, 0, z + dz * d); olharJa(Math.atan2(-dx, dz), -0.25); aplicarCamWalk();
+        return;
+      }
+      const alvo = new THREE.Vector3(x, 0.5, z), off = camera.position.clone().sub(controls.target).setLength(3.4);
+      autoFit = false; animarCamera(alvo.clone().add(off), alvo);
+    },
+    syncEstados, estadosDoItem,
+    carregar, cancelarCarry, confirmarCarry, girarCarry, alturaCarry, carryAtivo: () => carry.ativo, miraUid: () => mira.uid,
     refreshLuz() { if (!plan) return; aplicarEmissivos(); atualizarPool(); atualizarPontos(); },
-    setMode(m) { if (m === mode) return; mode = m; walk.keys.clear(); aplicarModo(); opts.onMode?.(m); },
+    setMode(m) { if (m === mode) return; if (m !== 'passeio') cancelarCarry(); mode = m; walk.keys.clear(); aplicarModo(); opts.onMode?.(m); },
     getMode: () => mode,
     setPeriodo(l) { periodo = l; aplicarPeriodo(); },
     getPeriodo: () => periodo,
@@ -1070,8 +1429,23 @@ export function createView3D(container, opts = {}) {
     pulsar,
     irPara(roomId) { if (mode !== 'passeio') { mode = 'passeio'; aplicarModo(); opts.onMode?.(mode); } irPara(roomId); },
     moveInput(x, y) { walk.mv = [x, y]; },
-    resetCamera() { aplicarModo(); },
-    setVisible(v) { visivel = v; if (v) { resize(); dirty = true; atualizarRecorte(0, true); } else walk.keys.clear(); },
+    rayDebug() { camera.updateMatrixWorld(); rayM.setFromCamera(new THREE.Vector2(0, 0), camera); rayM.far = 5; return rayM.intersectObjects(alvosMira(), true).slice(0, 6).map((q) => ({ n: q.object.name || q.object.type, uid: q.object.userData.uid, sup: q.object.userData.surface, d: +q.distance.toFixed(2), p: [q.point.x, q.point.y, q.point.z].map((v) => +v.toFixed(2)), nrm: q.face ? [q.face.normal.x, q.face.normal.y, q.face.normal.z].map((v) => +v.toFixed(2)) : null })); },
+    olhar(yaw, pitch = 0) { olharJa(yaw, pitch); aplicarCamWalk(); },
+    posicao: () => ({ x: walk.pos.x, z: walk.pos.z, yaw: walk.yaw }),
+    resetCamera() { if (mode === 'passeio') { fovManual = false; camera.fov = fovAuto(); camera.updateProjectionMatrix(); dirty = true; return; } aplicarModo(); },
+    zoomBy(f) {
+      if (mode === 'passeio') { fovManual = true; camera.fov = Math.max(40, Math.min(95, camera.fov * f)); camera.updateProjectionMatrix(); dirty = true; return; }
+      autoFit = false;
+      const off = camera.position.clone().sub(controls.target);
+      const nd = Math.max(controls.minDistance, Math.min(controls.maxDistance, off.length() * f));
+      off.setLength(nd);
+      animarCamera(controls.target.clone().add(off), controls.target.clone(), 200);
+    },
+    pronto: () => prontoP,
+    // compila os shaders em paralelo (quando o navegador permite) antes do primeiro quadro
+    compilar: async () => { try { await renderer.compileAsync(scene, camera); } catch { /* o primeiro render compila */ } },
+    diag: () => ({ programas: renderer.info.programs?.length ?? 0, geometrias: renderer.info.memory.geometries, texturas: renderer.info.memory.textures, chamadas: renderer.info.render.calls, tri: renderer.info.render.triangles }),
+    setVisible(v) { visivel = v; if (!v) cancelarCarry(); if (v) { resize(); dirty = true; atualizarRecorte(0, true); } else walk.keys.clear(); },
     render: requestRender,
     pontoNaTela(cx, cy) {
       const p = pontoPiso({ clientX: cx, clientY: cy }, 0);
@@ -1099,7 +1473,7 @@ export function createView3D(container, opts = {}) {
       pisos: pisoMeshes.length, peles: peleMeshes.length, tetos: tetoMeshes.length, interruptores: swMeshes.length / 2,
       chamadas: renderer.info.render.calls, tris: renderer.info.render.triangles,
     }),
-    info: () => ({ mode, pos: walk.pos.toArray(), yaw: walk.yaw, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
+    info: () => ({ mode, pos: walk.pos.toArray(), yaw: walk.yaw, pitch: walk.pitch, fov: camera.fov, cam: camera.position.toArray(), alvo: controls.target.toArray(), calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
     projetar(x, y, z) { const v = new THREE.Vector3(x, y, z).project(camera); const r = el.getBoundingClientRect(); return [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height]; },
     dispose() { cancelAnimationFrame(raf); ro.disconnect(); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); renderer.dispose(); },
   };

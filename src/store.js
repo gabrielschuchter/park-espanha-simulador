@@ -5,7 +5,7 @@ import { ACAB_VAZIO } from './data/acabamentos.js';
 
 const KEY_INDEX = 'pe.projetos.v1';
 const KEY_PROJ = (id) => `pe.projeto.v1.${id}`;
-const FORMATO = 'park-espanha/projeto@2';
+const FORMATO = 'park-espanha/projeto@3'; // @2 (sem peças fixas editáveis) continua sendo aceito na importação
 
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } }
@@ -86,13 +86,14 @@ export function normalizarAcab(p) {
   }
   p.paredes = {};
   p.acab = a;
+  if (!p.fix || typeof p.fix !== 'object') p.fix = {};
   return a;
 }
 
 export function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 function emit(kind) { for (const fn of listeners) fn(kind); }
 
-const snap = () => JSON.stringify({ itens: store.projeto.itens, acab: store.projeto.acab });
+const snap = () => JSON.stringify({ itens: store.projeto.itens, acab: store.projeto.acab, fix: store.projeto.fix });
 
 let baseline = null; // instantâneo antes de uma edição em andamento
 
@@ -120,9 +121,10 @@ function restore(s) {
   const o = JSON.parse(s);
   store.projeto.itens = o.itens;
   store.projeto.acab = o.acab || { ...ACAB_VAZIO() };
+  store.projeto.fix = o.fix || {};
   normalizarAcab(store.projeto);
   if (store.sel && !store.projeto.itens.some((i) => i.uid === store.sel)) store.sel = null;
-  emit('itens'); emit('acab'); emit('sel'); agendarSalvar(); emit('history');
+  emit('itens'); emit('acab'); emit('fixos'); emit('sel'); agendarSalvar(); emit('history');
 }
 export function undo() { if (!store.past.length) return; store.future.push(snap()); restore(store.past.pop()); }
 export function redo() { if (!store.future.length) return; store.past.push(snap()); restore(store.future.pop()); }
@@ -138,6 +140,18 @@ export function setLuzTodos(roomIds, patch) {
   for (const id of roomIds) a.luz[id] = { ...(a.luz[id] || {}), ...patch };
   agendarSalvar(); emit('luz');
 }
+// Peças fixas (pia, tanque, louças, box) e aberturas (portas, janelas): opções por peça em projeto.fix.
+// Chaves especiais: _ab (acabamento das aberturas) e _oc[id] (peça removida da vista).
+export function setFixo(id, patch) { edit((p) => { p.fix[id] = { ...(p.fix[id] || {}), ...patch }; }, 'fixos'); }
+export function restaurarFixo(id) { edit((p) => { delete p.fix[id]; }, 'fixos'); }
+export function setAberturas(patch) { edit((p) => { p.fix._ab = { ...(p.fix._ab || {}), ...patch }; }, 'fixos'); }
+
+// Simulação de uso (não persiste): portas abertas, cadeiras puxadas, pessoas sentadas. Vale para todos os móveis.
+export const uso = { aberto: false, cadeiras: false, pessoas: false };
+export function setUso(patch) { Object.assign(uso, patch); emit('uso'); }
+// Estado de um móvel: o global ou o do próprio item (ligado no inspetor)
+export const estadoDe = (it) => ({ portas: uso.aberto || it.aberto ? 1 : 0, cad: uso.cadeiras || it.cadeiras ? 1 : 0, pes: uso.pessoas || it.pessoas ? 1 : 0 });
+
 export function marcarNovo(id) { store.novos.add(id); }
 
 export function select(id) { if (store.sel !== id) { store.sel = id; emit('sel'); } }
@@ -179,7 +193,7 @@ export function criarProjeto(tipId, { sugestao = true, nome } = {}) {
   const p = {
     formato: FORMATO, id: uid(), tipologia: tipId,
     nome: nome || `Meu apartamento ${t.nome}${n ? ' ' + (n + 1) : ''}`,
-    itens: sugestao ? itensSugeridos(tipId) : [], paredes: {}, acab: ACAB_VAZIO(),
+    itens: sugestao ? itensSugeridos(tipId) : [], paredes: {}, acab: ACAB_VAZIO(), fix: {},
     criado: Date.now(), atualizado: Date.now(),
   };
   setProjeto(p); salvarAgora();
@@ -218,7 +232,7 @@ export function importarJSON(texto) {
   }));
   const p = {
     formato: FORMATO, id: uid(), tipologia: o.tipologia,
-    nome: (o.nome || 'Projeto importado') + '', itens, paredes: o.paredes || {}, acab: o.acab || ACAB_VAZIO(),
+    nome: (o.nome || 'Projeto importado') + '', itens, paredes: o.paredes || {}, acab: o.acab || ACAB_VAZIO(), fix: o.fix && typeof o.fix === 'object' ? o.fix : {},
     criado: Date.now(), atualizado: Date.now(),
   };
   setProjeto(p); salvarAgora();

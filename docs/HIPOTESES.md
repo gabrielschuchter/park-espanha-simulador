@@ -43,6 +43,39 @@ Referência para ajustes futuros das plantas. Todas as medidas estão em `src/da
 | Luz | Temperaturas 2700, 3500 e 5000 K; intensidade relativa | Simulação visual. Não calcula lux, uniformidade nem consumo |
 | Posição dos pontos de luz e interruptores | Um ponto no centro de cada cômodo; interruptor junto à porta | Estimativa. A planta de elétrica não foi consultada |
 
+## Escala humana e modo Passeio
+
+| Item | Valor adotado | Observação |
+|---|---|---|
+| Altura dos olhos | 1,62 m | Pessoa de cerca de 1,72 m; média adulta brasileira fica um pouco abaixo, então a vista tende a ser levemente mais alta que a do morador médio |
+| Velocidade | 1,4 m/s andando, passo de 0,72 m; correndo, passo de 0,95 m | Marcha normal de adulto. O balanço da câmera acompanha o passo |
+| Campo de visão | 64° vertical em tela larga (cerca de 90° horizontal em 16:9); 84° em retrato | Campos acima de 100° horizontal fazem cômodos pequenos parecerem corredores. Em retrato o horizontal cai para cerca de 45°, o que é incômodo; por isso a abertura maior |
+| Raio de colisão do corpo | 0,20 m | Ombros de cerca de 0,45 m, com folga para passar em vãos de 0,70 m |
+| Pessoa de referência | 1,70 m em pé; sentada com assento a 0,45 m | Itens "Medidas e escala" do catálogo; servem para comparar vãos e alturas |
+| Faixa de circulação | 0,60 m mínimo para passagem, 0,90 m recomendado | Valores usuais de ergonomia residencial; a tipologia PCD exige mais (ver abaixo) |
+
+A sensação de apartamento pequeno em primeira pessoa vem em parte da área real (45 m²) e em parte do campo de visão: a versão anterior usava 72° vertical, que exagera a proximidade das paredes. Não há como separar os dois efeitos sem teste com moradores.
+
+## Móveis e peças adicionados na terceira versão
+
+| Item | Valor adotado | Observação |
+|---|---|---|
+| Armários de cozinha | Balcão 0,60 × 0,90 m; aéreo 0,35 m de profundidade a 1,55 m do piso; torre de forno 0,60 × 2,10 m | Módulos de mercado usuais; marcas variam de 5 a 10 cm |
+| Eletrodomésticos | Geladeira duplex 0,70 × 0,75 × 1,80 m; fogão de 4 bocas 0,52 × 0,60 m; lava-louças 0,60 × 0,60 m | Medidas de catálogo de mercado; confira a ficha do modelo escolhido |
+| Mesas e cadeiras | Mesa de 4 lugares 1,20 × 0,80 m; cadeira 0,45 × 0,50 m com assento a 0,45 m; recuo da cadeira puxada de 0,35 m | Folga de 0,75 m entre a borda da mesa e a parede costuma ser o mínimo para sentar e levantar |
+| Peças da construtora | Aparência editável, posição fixa | A planta técnica só mostra o símbolo; louças e bancada usam dimensões de catálogo |
+| Pessoas sentadas | Bonecos esquemáticos | Servem para avaliar espaço, não proporções corporais individuais |
+
+## Cores de tinta de marca
+
+| Item | Valor adotado | Observação |
+|---|---|---|
+| Suvinil | 49 cores com RGB e código copiados da página oficial de cada cor (suvinil.com.br/cores), consultadas em 20/10/2026 | O hex é a conversão direta do RGB. Onde a busca devolveu um nome parecido, foi registrado o nome oficial devolvido, não o pedido. Palha e Gelo não foram obtidas |
+| Sherwin-Williams | 11 cores (Alabaster 7008, Pure White 7005, Agreeable Gray 7029, Repose Gray 7015, Accessible Beige 7036, Worldly Gray 7043, Sea Salt 6204, Universal Khaki 6150, Tricorn Black 6258, Iron Ore 7069, Naval 6244) | Hex do paintdb.com. Nomes em inglês; o catálogo brasileiro usa os mesmos códigos SW, mas os nomes locais não foram confirmados |
+| Coral e demais marcas | Não incluídas | Não encontrei fonte oficial com RGB acessível. Inventar ou estimar o hex contraria o pedido de cor exata. "Cor própria" aceita qualquer hex |
+| "Mais vendida" e "Cor do ano" | Marca ou varejo cita a cor entre as mais vendidas; Cor do Ano é a escolha anual da marca | Não é ranking auditado e não há série de vendas pública |
+| Fidelidade na tela | O swatch mostra o RGB exato; no 3D a cor muda com a luz e o tom do render | No teste, o Papel Picado (216, 211, 202) ao meio-dia apareceu em torno de (215, 207, 197). Tela não reproduz brilho nem textura da tinta |
+
 ## Incoerências encontradas
 
 - **Meio:** áreas calculadas pelas cotas fecham com a legenda com diferença máxima de 0,04 m² por cômodo. A soma das áreas úteis é 38,08 m² (legenda) contra 45,68 m² de área privativa, que inclui paredes.

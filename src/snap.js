@@ -8,7 +8,7 @@ export function colide(plan, it, itens) {
   const P = rectCorners(it);
   if (!plan.rooms.some((r) => pointInPoly(it.x, it.y, r.poly))) return true;
   if (plan.pieces.some((p) => !p.verga && p.z0 < it.elev + it.h && p.z1 > it.elev && convexOverlap(P, p.poly) > 0.005)) return true;
-  if (plan.fixos.some((f) => it.elev < Math.max(f.h, 0.02) && convexOverlap(P, f.poly) > 0.005)) return true;
+  if (plan.fixos.some((f) => !f.oculto && it.elev < Math.max(f.h, 0.02) && convexOverlap(P, f.poly) > 0.005)) return true;
   return itens.some((o) => o.uid !== it.uid && !catalogoPorId[o.tipo]?.livre && o.elev < it.elev + it.h && o.elev + o.h > it.elev && convexOverlap(P, rectCorners(o)) > 0.005);
 }
 

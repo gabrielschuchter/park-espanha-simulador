@@ -1,7 +1,7 @@
 // Ferramentas de acabamento: paredes, piso, teto e luz. Cada uma funciona como um pincel:
 // escolha uma amostra no painel e clique no cômodo (planta) ou na superfície (3D).
 import {
-  PISOS, TINTAS, REVESTIMENTOS, TEXTURAS_PAREDE, RODAPES, TETOS, REBAIXOS, COR_TETO, LUZ_TEMPS,
+  PISOS, REVESTIMENTOS, TEXTURAS_PAREDE, RODAPES, TETOS, REBAIXOS, COR_TETO, LUZ_TEMPS,
   pisoPorId, texParedePorId, tetoPorId, paredeOriginal, pisoDe, paredeDe, tetoDe, luzDe, rodapeDe, tempPorId,
 } from '../data/acabamentos.js';
 import { catalogoPorId } from '../data/catalogo.js';
@@ -10,19 +10,37 @@ import { tetoY } from '../tetoGeo.js';
 import { pointInPoly } from '../geom.js';
 import { store, edit, setLuz, setLuzTodos, undo } from '../store.js';
 import { $, $$, esc, cm, fmtM2, toast } from './util.js';
+import { montarSeletorCores } from './cores.js';
 import { tocar } from '../audio.js';
 
-const thumbs = new Map();
+// Miniaturas desenhadas sob demanda, uma por vez, para não travar a abertura dos painéis.
+const thumbs = new Map(), defsPend = new Map();
+const VAZIO = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 function thumb(def) {
-  if (!thumbs.has(def.id)) thumbs.set(def.id, miniaturaCanvas(def, 64).toDataURL());
-  return thumbs.get(def.id);
+  if (thumbs.has(def.id)) return thumbs.get(def.id);
+  defsPend.set(def.id, def);
+  return VAZIO;
+}
+let thumbTimer = 0;
+export function preencherThumbs() {
+  if (thumbTimer) return;
+  const passo = () => {
+    thumbTimer = 0;
+    const imgs = [...document.querySelectorAll('img[data-tid]')].filter((i) => i.getAttribute('src') === VAZIO && i.offsetParent !== null);
+    if (!imgs.length) return;
+    const id = imgs[0].dataset.tid, def = defsPend.get(id);
+    if (def && !thumbs.has(id)) { thumbs.set(id, miniaturaCanvas(def, 64).toDataURL()); defsPend.delete(id); }
+    for (const i of imgs) if (i.dataset.tid === id) { i.src = thumbs.get(id); i.classList.add('ok'); }
+    thumbTimer = setTimeout(passo, 8);
+  };
+  thumbTimer = setTimeout(passo, 16);
 }
 const F = {
   tool: 'moveis',
   esc: { paredes: 'comodo', piso: 'comodo', teto: 'comodo' },
   ptab: 'tinta',
   brush: {
-    paredes: { kind: 'tinta', cor: TINTAS[2][0], nome: TINTAS[2][1] },
+    paredes: { kind: 'tinta', cor: '#d8d3ca', nome: 'Papel Picado', marca: 'suvinil', codigo: 'B148' },
     piso: { id: 'lam-claro' },
     teto: { tipo: 'gesso', drop: 0.10, cor: COR_TETO[0][0] },
   },
@@ -32,7 +50,7 @@ let A = null; // ponte com main.js
 const ICONE_LAMP = '<path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0012 3z" />';
 
 // ------------------------------------------------------------ amostras
-const swTex = (def, ativo, extra = '') => `<button class="sw${ativo ? ' on' : ''}" ${extra} title="${esc(def.nome)}" aria-label="${esc(def.nome)}"><img src="${thumb(def)}" alt="" width="52" height="52"><span>${esc(def.nome)}</span></button>`;
+const swTex = (def, ativo, extra = '') => `<button class="sw${ativo ? ' on' : ''}" ${extra} title="${esc(def.nome)}" aria-label="${esc(def.nome)}"><img src="${thumb(def)}" data-tid="${def.id}" alt="" width="52" height="52" class="${thumbs.has(def.id) ? 'ok' : ''}"><span>${esc(def.nome)}</span></button>`;
 const swCor = (cor, nome, ativo, extra = '') => `<button class="sw sw-cor${ativo ? ' on' : ''}" ${extra} title="${esc(nome)}" aria-label="${esc(nome)}"><i style="background:${cor}"></i><span>${esc(nome)}</span></button>`;
 const swOrig = (ativo, extra = '') => `<button class="sw sw-orig${ativo ? ' on' : ''}" ${extra} title="Como a construtora entrega" aria-label="Original da construtora"><i></i><span>Original</span></button>`;
 
@@ -42,8 +60,11 @@ function desenharParedes() {
   const orig = swOrig(b.kind === 'original', 'data-orig="1"');
   if (F.ptab === 'tinta') {
     const cur = b.kind === 'tinta' ? b.cor : null;
-    el.innerHTML = `<div class="sw-grid">${orig}${TINTAS.map(([c, n]) => swCor(c, n, cur === c, `data-cor="${c}" data-nome="${esc(n)}"`)).join('')}</div>
-      <label class="sw-pers"><span>Cor personalizada</span><input type="color" id="cor-pers" value="${cur || '#e9e1d3'}" aria-label="Cor personalizada"></label>`;
+    el.innerHTML = `<div class="sw-grid">${orig}</div><div id="cm-host"></div>`;
+    montarSeletorCores($('#cm-host', el), {
+      atual: cur, nome: b.nome, marca: b.marca, codigo: b.codigo,
+      onPick: (o) => { F.brush.paredes = { kind: 'tinta', ...o }; $$('#sw-paredes .sw-orig.on').forEach((x) => x.classList.remove('on')); },
+    });
   } else if (F.ptab === 'rev') {
     el.innerHTML = `<div class="sw-grid">${orig}${REVESTIMENTOS.map((d) => swTex(d, b.kind === 'tex' && b.id === d.id, `data-tex="${d.id}"`)).join('')}</div><p class="nota">Revestimentos para paredes molhadas ou de destaque.</p>`;
   } else if (F.ptab === 'tex') {
@@ -59,6 +80,7 @@ function desenharParedes() {
     dica.textContent = F.ptab === 'rodape' ? 'Escolha o rodapé e clique no cômodo.' : em3d ? 'Escolha um acabamento e clique na parede no 3D. Na planta, o clique pinta o cômodo inteiro.' : 'Escolha um acabamento e clique no cômodo na planta. Para pintar uma parede só, use a vista 3D.';
   }
   $$('#esc-paredes button').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.esc === F.esc.paredes)));
+  preencherThumbs();
 }
 
 function desenharPiso() {
@@ -67,6 +89,7 @@ function desenharPiso() {
   $('#sw-piso').innerHTML = `<div class="sw-grid">${swOrig(!b.id, 'data-orig="1"')}</div>` +
     Object.entries(gr).map(([g, l]) => `<h3 class="sub">${g}</h3><div class="sw-grid">${l.map((d) => swTex(d, b.id === d.id, `data-piso="${d.id}"`)).join('')}</div>`).join('');
   $$('#esc-piso button').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.esc === F.esc.piso)));
+  preencherThumbs();
 }
 
 const SEC = {
@@ -153,8 +176,8 @@ export function aplicar(tipo, roomId, edge, origem3d = false) {
         else for (const r of lista) { delete a.parede[r.id]; for (const k of Object.keys(a.destaque)) if (k.startsWith(r.id + ':')) delete a.destaque[k]; }
         frase = `${room.nome}: parede original.`;
       } else {
-        const fin = b.kind === 'tex' ? { t: 'tex', id: b.id } : { t: 'tinta', cor: b.cor };
-        const nome = b.kind === 'tex' ? texParedePorId[b.id].nome : b.nome || b.cor;
+        const fin = b.kind === 'tex' ? { t: 'tex', id: b.id } : { t: 'tinta', cor: b.cor, ...(b.nome ? { nome: b.nome } : {}), ...(b.marca ? { marca: b.marca, codigo: b.codigo } : {}) };
+        const nome = b.kind === 'tex' ? texParedePorId[b.id].nome : (b.marca ? `${b.marca === 'suvinil' ? 'Suvinil' : 'Sherwin-Williams'} ${b.nome} (${b.codigo})` : b.nome || b.cor);
         const comMeia = (r) => (b.kind === 'tinta' && r.banho ? { ...fin, meia: paredeOriginal(r).meia } : fin);
         if (esc_ === 'unico' && edge != null) { a.destaque[`${roomId}:${edge}`] = comMeia(room); frase = `${room.nome}: uma parede em ${nome.toLowerCase()}.`; }
         else {
@@ -188,16 +211,10 @@ export function iniciarFerramentas(ponte) {
   $('#sw-paredes').addEventListener('click', (ev) => {
     const b = ev.target.closest('button'); if (!b) return;
     if (b.dataset.orig) F.brush.paredes = { kind: 'original' };
-    else if (b.dataset.cor) F.brush.paredes = { kind: 'tinta', cor: b.dataset.cor, nome: b.dataset.nome };
     else if (b.dataset.tex) F.brush.paredes = { kind: 'tex', id: b.dataset.tex };
     else if (b.dataset.rod) F.brush.paredes = { kind: 'rodape', id: b.dataset.rod };
     else return;
     tocar('clique'); desenharParedes();
-  });
-  $('#sw-paredes').addEventListener('input', (ev) => {
-    if (ev.target.id !== 'cor-pers') return;
-    F.brush.paredes = { kind: 'tinta', cor: ev.target.value, nome: 'cor personalizada' };
-    $$('#sw-paredes .sw.on').forEach((x) => x.classList.remove('on'));
   });
   $('#sw-piso').addEventListener('click', (ev) => {
     const b = ev.target.closest('button'); if (!b) return;
@@ -229,9 +246,10 @@ export function iniciarFerramentas(ponte) {
 
 export function redesenharFerramentas() {
   desenharParedes(); desenharPiso(); desenharTeto(); desenharLuz();
+  preencherThumbs();
 }
 export const escopoAtual = (tool) => F.esc[tool];
 export const ferramentaAtual = () => F.tool;
-export function trocarFerramenta(t) { F.tool = t; A.v3()?.setEscopo(F.esc[t] || 'comodo'); if (t === 'paredes') desenharParedes(); }
+export function trocarFerramenta(t) { F.tool = t; A.v3()?.setEscopo(F.esc[t] || 'comodo'); if (t === 'paredes') desenharParedes(); setTimeout(preencherThumbs, 30); }
 export { desenharParedes };
 void esc; void fmtM2; void paredeDe; void rodapeDe; void tetoDe; void tempPorId; void pisoDe;

@@ -101,6 +101,52 @@ export function simboloItem(it) {
     case 'cesto': return C(0, 0, hw, 'mv-body') + C(0, 0, hw * 0.7, 'mv-line fina');
     case 'cortina': { let p = `M${-hw} 0`; const n = Math.max(6, Math.round(w / 0.12)); for (let i = 1; i <= n; i++) p += ` Q${f2(-hw + (w / n) * (i - 0.5))} ${i % 2 ? -hd : hd} ${f2(-hw + (w / n) * i)} 0`; return `<path d="${p}" class="mv-line cortina" />`; }
     case 'varal': return R(-hw, -hd, w, d, 'mv-body tracejado') + Ln(-hw, 0, hw, 0);
+    case 'armario': {
+      const k = c.cfg?.k || 'base', alto = k === 'aereo' || k === 'suspenso' || it.elev >= 1.0;
+      let q = R(-hw, -hd, w, d, 'mv-body' + (alto ? ' tracejado' : ''), 0.01);
+      const comp = c.cfg?.comp || [['portas', null, w <= 0.62 ? 1 : w <= 1.32 ? 2 : 3]];
+      const pri = comp.find((x) => x[0] === 'portas' || x[0] === 'vidro' || x[0] === 'flap') || comp[0];
+      const n = pri[2] || 1;
+      if (pri[0] === 'gav') for (let i = 1; i <= 2; i++) q += Ln(-hw + 0.03, hd - 0.03 * i, hw - 0.03, hd - 0.03 * i);
+      else for (let i = 1; i < n; i++) q += Ln(-hw + (w / n) * i, hd - 0.07, -hw + (w / n) * i, hd);
+      if (c.cfg?.cuba) q += R(-w * 0.12 - Math.min(0.25, w * 0.2), -d * 0.2, Math.min(0.5, w * 0.4), Math.min(0.36, d * 0.55), 'mv-line', 0.04);
+      if (c.cfg?.balanco) q += R(-hw, hd, w, c.cfg.balanco, 'mv-body', 0.01);
+      return q;
+    }
+    case 'mesaJ': {
+      const cfg = c.cfg || {}, forma = cfg.forma || 'ret', nl = cfg.lugares || 4;
+      let q = '';
+      if (forma === 'red') {
+        const r = Math.max(0.35, Math.min(w, d) / 2 - 0.30);
+        for (let i = 0; i < nl; i++) { const a = (i / nl) * Math.PI * 2; q += `<g transform="translate(${f2(Math.sin(a) * (r + 0.12))} ${f2(Math.cos(a) * (r + 0.12))}) rotate(${-deg(a)})">${R(-0.21, -0.18, 0.42, 0.44, 'mv-light', 0.04)}</g>`; }
+        return q + C(0, 0, r);
+      }
+      const td = cfg.encosto ? d - 0.30 : Math.max(0.5, d - 0.60), zt = cfg.encosto ? -0.15 : 0;
+      const lados = cfg.encosto ? [1] : [1, -1], heads = nl >= 6 && !cfg.encosto;
+      const nSide = Math.max(1, Math.ceil((nl - (heads ? 2 : 0)) / (cfg.encosto ? 1 : 2)));
+      for (const sg of lados) for (let i = 0; i < nSide; i++) {
+        const cx = nSide === 1 ? 0 : -w / 2 + (w / nSide) * (i + 0.5);
+        q += R(cx - 0.21, zt + sg * (td / 2) + (sg > 0 ? -0.02 : -0.44), 0.42, 0.46, 'mv-light', 0.04);
+      }
+      if (heads) for (const sg of [-1, 1]) q += R(sg * (w / 2 + 0.02) + (sg > 0 ? 0 : -0.46), zt - 0.21, 0.46, 0.42, 'mv-light', 0.04);
+      if (cfg.encosto) q += R(-hw, -hd, w, 0.40, 'mv-dark', 0.03);
+      return q + (forma === 'ovl' ? `<ellipse cx="0" cy="${f2(zt)}" rx="${f2(hw)}" ry="${f2(td / 2)}" class="mv-body" />` : R(-hw, zt - td / 2, w, td, 'mv-body', 0.02));
+    }
+    case 'sofaCanto': {
+      const b = 0.95;
+      return `<path d="M${-hw} ${-hd} H${hw} V${hd} H${hw - b} V${-hd + 0.95} H${-hw} Z" class="mv-body" />` + R(-hw + 0.16, -hd, w - 0.32, 0.2, 'mv-line');
+    }
+    case 'cooktop': { let q = R(-hw, -hd, w, d, 'mv-dark', 0.02); for (const sx of [-1, 1]) for (const sz of [-1, 1]) q += C(sx * w * 0.24, sz * d * 0.22, Math.min(w, d) * 0.11, 'mv-line'); return q; }
+    case 'coifa': return R(-hw, -hd, w, d, 'mv-body tracejado');
+    case 'lavaLoucas': return R(-hw, -hd, w, d, 'mv-body', 0.02) + Ln(-hw, -hd, hw, hd, 'mv-line fina') + Ln(hw, -hd, -hw, hd, 'mv-line fina');
+    case 'eletroP': return R(-hw, -hd, w, d, 'mv-body' + (it.elev >= 0.5 ? ' tracejado' : ''), 0.03);
+    case 'acess': return R(-hw, -hd, w, Math.max(d, 0.03), 'mv-body' + (it.elev >= 1.0 ? ' tracejado' : ''), 0.02);
+    case 'pessoaEscala': return `<ellipse cx="0" cy="0" rx="${f2(Math.min(hw, 0.24))}" ry="${f2(Math.min(hd, 0.14))}" class="mv-body" />` + C(0, 0, 0.09, 'mv-dark');
+    case 'cadeiraRodas': return R(-hw, -hd, w, d, 'mv-body', 0.05) + C(-hw + 0.03, -0.08, 0.3, 'mv-line fina') + C(hw - 0.03, -0.08, 0.3, 'mv-line fina');
+    case 'gabarito': {
+      const k = c.cfg?.k;
+      return (k === 'giro' ? C(0, 0, Math.min(hw, hd), 'mv-gab') : R(-hw, -hd, w, d, 'mv-gab'));
+    }
     default: return R(-hw, -hd, w, d, 'mv-body', 0.01);
   }
 }
@@ -231,12 +277,16 @@ export function createPlan2D(host, opts = {}) {
       }
     }
     L.open.innerHTML = h;
-    h = '';
+    desenharFixos();
+    void tip;
+  }
+  function desenharFixos() {
+    let h = '';
     for (const f of plan.fixos) {
+      if (f.oculto) continue;
       h += `<g transform="translate(${f2(f.x)} ${f2(f.y)}) rotate(${f.rot || 0})" class="fixo">${simboloFixo(f)}</g>`;
     }
     L.fix.innerHTML = h;
-    void tip;
   }
 
   function simboloFixo(f) {
@@ -592,6 +642,7 @@ export function createPlan2D(host, opts = {}) {
 
   return {
     setPlan(p) { plan = p; host.dataset.fitted = ''; desenharPlanta(); requestAnimationFrame(() => { fit(); host.dataset.fitted = '1'; }); },
+    redrawFixos() { if (plan) desenharFixos(); },
     redrawItems() { if (!plan) return; desenharItens(); desenharTela(); desenharDistancias(); },
     setAnalise(a) { analise = a; if (plan) { desenharItens(); desenharCirculacao(); } },
     redrawAcab() {

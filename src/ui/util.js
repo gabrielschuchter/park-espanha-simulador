@@ -10,6 +10,31 @@ export const mobile = () => window.matchMedia('(max-width: 860px)').matches;
 export const toque = () => window.matchMedia('(pointer: coarse)').matches;
 export const slug = (t) => String(t || 'projeto').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'projeto';
 
+// Espera o navegador pintar (dois quadros) para que mensagens de carregamento apareçam antes do trabalho pesado.
+export const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+export const ocioso = () => new Promise((r) => setTimeout(r, 0));
+
+// Camada de carregamento com texto e barra de progresso. Retorna controles.
+let nCar = 0;
+export function carregando(texto = 'Carregando…') {
+  const el = $('#carregando'); if (!el) return { txt() {}, prog() {}, fim() {} };
+  nCar++;
+  el.hidden = false; el.classList.add('on');
+  $('#car-txt').textContent = texto; $('#car-bar i').style.width = '8%';
+  let fechado = false;
+  return {
+    txt(t) { if (!fechado) $('#car-txt').textContent = t; },
+    prog(p) { if (!fechado) $('#car-bar i').style.width = `${Math.round(Math.max(4, Math.min(100, p * 100)))}%`; },
+    fim() {
+      if (fechado) return; fechado = true; nCar = Math.max(0, nCar - 1);
+      if (nCar) return;
+      $('#car-bar i').style.width = '100%';
+      el.classList.remove('on');
+      setTimeout(() => { if (!nCar) el.hidden = true; }, 220);
+    },
+  };
+}
+
 let tToast = null;
 export function toast(msg, rotulo, fn) {
   const t = $('#toast');

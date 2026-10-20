@@ -1,63 +1,11 @@
 // Modelos 3D paramétricos. Origem no centro da projeção no piso; x = largura,
 // z = profundidade (frente em +z), y = altura. Tudo em metros.
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { texTecido, texMadeira, texGranito, texQuadro } from './textures.js';
+import { mat, rbox, add, B, cyl, pernas, lampMat, disco } from './helpers3d.js';
+import { texTecido, texMadeira } from './textures.js';
+import { extra, adicionarPessoas } from './mobiliario.js';
 
-const matCache = new Map();
-export function mat(kind, cor = '#ffffff') {
-  const key = kind + cor;
-  if (matCache.has(key)) return matCache.get(key);
-  let m;
-  const c = new THREE.Color(cor);
-  switch (kind) {
-    case 'tecido': m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.95, map: texTecido() }); break;
-    case 'madeira': m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, map: texMadeira() }); break;
-    case 'laca': m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.38 }); break;
-    case 'metal': m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.32, metalness: 0.75 }); break;
-    case 'inox': m = new THREE.MeshStandardMaterial({ color: '#c9ccd0', roughness: 0.25, metalness: 0.9 }); break;
-    case 'vidro': m = new THREE.MeshPhysicalMaterial({ color: '#dbe9ef', roughness: 0.05, metalness: 0, transmission: 0.0, transparent: true, opacity: 0.22, depthWrite: false }); break;
-    case 'espelho': m = new THREE.MeshStandardMaterial({ color: '#dfe7ea', roughness: 0.02, metalness: 1 }); break;
-    case 'tela': m = new THREE.MeshStandardMaterial({ color: '#0d0f12', roughness: 0.15, metalness: 0.4 }); break;
-    case 'ceramica': m = new THREE.MeshStandardMaterial({ color: '#f6f5f2', roughness: 0.18 }); break;
-    case 'granito': m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.25, map: texGranito() }); break;
-    case 'folha': m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.75, flatShading: true }); break;
-    case 'luz': m = new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: '#ffe2a8', emissiveIntensity: 1.2, roughness: 0.6 }); break;
-    case 'quadro': m = new THREE.MeshStandardMaterial({ map: texQuadro(cor), roughness: 0.8 }); break;
-    default: m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 });
-  }
-  matCache.set(key, m);
-  return m;
-}
-
-const geoCache = new Map();
-function rbox(w, h, d, r) {
-  r = Math.max(0.001, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
-  const key = [w, h, d, r].map((v) => v.toFixed(3)).join('|');
-  if (!geoCache.has(key)) geoCache.set(key, r > 0.004 ? new RoundedBoxGeometry(w, h, d, 3, r) : new THREE.BoxGeometry(w, h, d));
-  return geoCache.get(key);
-}
-function add(g, geo, m, x, y, z, ry = 0) {
-  const mesh = new THREE.Mesh(geo, m);
-  mesh.position.set(x, y, z); mesh.rotation.y = ry;
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  g.add(mesh); return mesh;
-}
-// caixa com base em y0
-const B = (g, w, h, d, m, x, y0, z, r = 0.01) => add(g, rbox(w, h, d, r), m, x, y0 + h / 2, z);
-const cyl = (g, rt, rb, h, m, x, y0, z, seg = 20) => add(g, new THREE.CylinderGeometry(rt, rb, h, seg), m, x, y0 + h / 2, z);
-function pernas(g, w, d, h, m, inset = 0.05, r = 0.018) {
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) cyl(g, r, r * 0.8, h, m, sx * (w / 2 - inset), 0, sz * (d / 2 - inset), 10);
-}
-
-// Material emissivo próprio de cada luminária (liga e desliga por cômodo)
-function lampMat(g, cor = '#fff2d6') {
-  const m = new THREE.MeshStandardMaterial({ color: cor, emissive: '#ffd39a', emissiveIntensity: 1.1, roughness: 0.5 });
-  if (!g.userData.emissivos) g.userData.emissivos = [];
-  g.userData.emissivos.push(m);
-  return m;
-}
-const disco = (g, r, h, m, x, y0, z) => cyl(g, r, r, h, m, x, y0, z, 28);
+export { mat };
 
 const builders = {
   sofa(g, { w, d, h, cor }) {
@@ -510,58 +458,13 @@ const builders = {
   caixa(g, { w, d, h, cor }) { B(g, w, h, d, mat('madeira', cor), 0, 0, 0, 0.008); },
 };
 
-// ---------------------------------------------------------------- elementos fixos
-const fixBuilders = {
-  bancada(g, { w, d, h }) {
-    const gr = mat('granito');
-    B(g, w, 0.03, d, gr, 0, h - 0.03, 0, 0.003);
-    B(g, w, 0.10, 0.02, gr, 0, h, -d / 2 + 0.01, 0.003);
-    const cuba = B(g, 0.50, 0.012, 0.36, mat('inox'), -w * 0.12, h - 0.005, 0.02, 0.01);
-    cuba.scale.y = 1;
-    cyl(g, 0.012, 0.014, 0.30, mat('inox'), -w * 0.12, h, -d / 2 + 0.07, 10);
-    const bico = B(g, 0.02, 0.02, 0.20, mat('inox'), -w * 0.12, h + 0.28, -d / 2 + 0.16, 0.008);
-    bico.rotation.x = 0.1;
-    // armário sob a pia (sugestão; a construtora entrega só a bancada)
-    B(g, 0.03, h - 0.03, d - 0.05, mat('laca', '#d8d4cc'), w / 2 - 0.015, 0, 0, 0.004);
-  },
-  tanque(g, { w, d, h }) {
-    const c = mat('ceramica');
-    B(g, w, 0.28, d, c, 0, h - 0.28, 0, 0.03);
-    B(g, 0.10, h - 0.28, 0.12, c, 0, 0, -d / 2 + 0.1, 0.02);
-    cyl(g, 0.012, 0.014, 0.22, mat('inox'), 0, h, -d / 2 + 0.05, 10);
-  },
-  vaso(g, { w, d }) {
-    const c = mat('ceramica');
-    B(g, w, 0.36, 0.18, c, 0, 0.42, -d / 2 + 0.09, 0.04);
-    const bowl = cyl(g, w / 2, w * 0.36, 0.40, c, 0, 0, 0.08, 28); bowl.scale.z = 1.35;
-    const tampa = cyl(g, w / 2 + 0.005, w / 2 + 0.005, 0.025, mat('ceramica'), 0, 0.40, 0.08, 28); tampa.scale.z = 1.35;
-  },
-  lavatorio(g, { w, d, h }) {
-    const c = mat('ceramica');
-    B(g, w, 0.16, d, c, 0, h - 0.16, 0, 0.05);
-    B(g, 0.16, h - 0.16, 0.16, c, 0, 0, -d / 2 + 0.1, 0.04);
-    cyl(g, 0.01, 0.012, 0.16, mat('inox'), 0, h, -d / 2 + 0.05, 10);
-  },
-  box(g, { w, d }, peDireito) {
-    const v = mat('vidro');
-    const p = add(g, new THREE.BoxGeometry(w * 0.98, 1.90, 0.008), v, 0, 0.95, d / 2);
-    p.castShadow = false;
-    B(g, w * 0.98, 0.02, 0.025, mat('metal', '#b9bcc0'), 0, 1.90, d / 2, 0.003);
-    cyl(g, 0.012, 0.012, 0.012, mat('metal', '#3a3a3a'), 0, 0, 0, 16);
-    const ch = cyl(g, 0.08, 0.08, 0.02, mat('inox'), 0, 2.10, -d / 2 + 0.28, 24); ch.castShadow = false;
-    B(g, 0.02, 0.02, 0.28, mat('inox'), 0, 2.13, -d / 2 + 0.14, 0.005);
-    void peDireito;
-  },
-};
+// Construtores novos (mobiliario.js) substituem os antigos de mesmo nome.
+const todos = { ...builders, ...extra };
 
 export function buildFurniture(it, catalogo) {
   const g = new THREE.Group();
-  const fn = builders[catalogo?.modelo] || builders.caixa;
-  fn(g, it, catalogo);
-  return g;
-}
-export function buildFixture(f, peDireito) {
-  const g = new THREE.Group();
-  (fixBuilders[f.tipo] || builders.caixa)(g, f, peDireito);
+  const c = catalogo || {};
+  (todos[c.modelo] || todos.caixa)(g, it, c);
+  adicionarPessoas(g, it, c);
   return g;
 }
