@@ -87,8 +87,33 @@ Para ajustar, edite as coordenadas da parede ou da abertura em `tipologias.js` e
 
 ## Tipologia PCD
 
-A planta oficial não foi localizada. A entrada `pcd` em `tipologias.js` existe sem geometria e aparece na tela inicial como "em breve". Ao receber a planta:
+Fonte: planta humanizada da unidade PCD enviada pelo morador em 21/10/2026 (imagem sem escala impressa, sem espessura de parede e sem área). A distribuição coincide com a Ponta, com os dois banheiros fundidos num banheiro acessível.
 
-1. Copie a estrutura de `meio` (paredes, aberturas, cômodos, fixos, cotas) com as medidas da planta PCD e remova `pendente: true`.
-2. Mantenha o bloco `requisitos`. A análise passa a exigir passagem livre de 0,90 m (em vez de 0,60 m) e a procurar, em cada cômodo, um círculo livre de 1,50 m de diâmetro alcançável a partir da entrada (critérios de deslocamento e manobra da ABNT NBR 9050).
-3. O simulador indica conflitos de uso; não substitui a verificação de acessibilidade por profissional habilitado.
+| Item | Valor adotado | Origem |
+|---|---|---|
+| Quarto 1 | 2,50 × 2,40 m | Cota da imagem, igual à Ponta |
+| Serviço + varanda | 1,20 × 3,40 m | Cota da imagem |
+| Cozinha + jantar | 3,40 m de largura; bancada na parede de 2,50 m | Cota da imagem |
+| Circulação, sala e quarto 2 | Iguais à Ponta (3,26 na imagem; 3,25 na planta da Ponta) | Diferença de 1 cm atribuída a arredondamento da imagem |
+| Banheiro acessível | 2,00 × 2,35 m, um só banheiro | Cota da imagem |
+| Portas | 0,90 m em todas as portas internas, no banheiro e na entrada (vão livre de cerca de 0,82 m), na mesma posição da Ponta; a do quarto 1 recua 20 cm para caber | Estimativa: a NBR 9050 pede vão livre mínimo de 0,80 m; a imagem não mostra a largura |
+| Móveis sugeridos | Mesa de 2 lugares e guarda-roupas menores que na Ponta | Com a mesa de 4 lugares, a passagem de 0,90 m entre sala e circulação fecha |
+| Lavatório | Suspenso, sem coluna, na parede das janelas | Posição medida na imagem |
+| Bacia | Junto à parede de baixo, à direita | Posição medida na imagem; barras de apoio não modeladas |
+| Área do chuveiro | 0,95 × 0,90 m, com cortina, sem box rígido | Posição medida na imagem; banco articulado não modelado |
+| Janelas do banheiro | Duas basculantes na parede externa | Posição medida na imagem |
+| Área privativa | ≈ 45,04 m² (valor da Ponta) | Não consta na imagem; a tela mostra "≈" |
+
+A análise usa os critérios da NBR 9050 declarados em `requisitos`: passagem de 0,90 m e círculo de manobra de 1,50 m por cômodo. O simulador indica conflitos de uso; não substitui a verificação de acessibilidade por profissional habilitado. Se a planta técnica da unidade PCD aparecer, ela substitui as medidas lidas na imagem.
+
+## Conferência de escala (21/10/2026)
+
+`tools/auditoria.mjs` compara cada cota da planta com a distância no modelo. Resultado: todas as cotas internas da Meio e da Ponta batem com o modelo com diferença de 0 cm; na PCD a única diferença é o 3,26 da imagem contra 3,25 da Ponta (1 cm).
+
+Convenção das cotas: o número escrito dentro do cômodo é tratado como medida interna, de face a face das paredes, e o modelo coloca as paredes do lado de fora desse número. Não se desconta a espessura da parede. Muitas plantas de vendas medem na alvenaria sem revestimento; onde entra cerâmica com argamassa, cada face perde em geral de 1,5 a 2,5 cm. Não confirmei qual convenção vale nas plantas do Park Espanha (precisa da nota de rodapé da planta ou do memorial).
+
+O que continua estimado e pode explicar diferenças de sensação: espessura das paredes (15 cm), largura das portas internas (70 cm) e da entrada (80 cm), largura e peitoril das janelas (1,20 m a 1,00 m do piso; basculante 0,60 m a 1,50 m), posição das portas ao longo da parede, altura dos olhos no Passeio (1,62 m) e o campo de visão. As medidas dos móveis do catálogo são de mercado (cama de casal 138 × 188 cm, sofá de 3 lugares 220 × 92 cm, geladeira duplex 70 × 72 × 180 cm) e podem ser editadas por móvel.
+
+## Peças e aberturas editáveis
+
+Pia, tanque, bacia, lavatório e box podem ser movidos, girados, ocultados e restaurados; a posição original fica guardada. Portas podem ser retiradas (fica o vão e o batente) e recolocadas; janelas podem ser ocultadas (fica o vão) e recolocadas. Porta retirada deixa de contar nos avisos de giro de porta. Largura e posição dos vãos seguem a planta. Paredes não mudam.

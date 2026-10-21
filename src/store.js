@@ -59,6 +59,11 @@ const SUGESTOES = {
     ['grcorrer', { x: 2.75, y: 4.15, w: 1.50, rot: 0 }],
   ],
 };
+// PCD: mesma distribuição da Ponta, com o quarto 2 mais livre para manobra
+// (passagens de 90 cm e portas mais largas: mesa de 2 lugares e guarda-roupas menores, sem avisos na análise)
+SUGESTOES.pcd = SUGESTOES.ponta.filter(([t]) => t !== 'criado' && t !== 'planta')
+  .map(([t, o]) => (t === 'grcorrer' ? [t, o.y < 2 ? { ...o, w: 1.40, y: 0.75 } : { ...o, x: 2.90, w: 1.20 }]
+    : t === 'jantar4' ? ['jantar2', { x: 4.00, y: 3.05, rot: 0 }] : [t, o]));
 
 export function itensSugeridos(tipId) {
   return (SUGESTOES[tipId] || []).map(([cat, p]) => novoItem(cat, p));
@@ -92,6 +97,7 @@ export function normalizarAcab(p) {
 
 export function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 function emit(kind) { for (const fn of listeners) fn(kind); }
+export const notificar = emit;
 
 const snap = () => JSON.stringify({ itens: store.projeto.itens, acab: store.projeto.acab, fix: store.projeto.fix });
 

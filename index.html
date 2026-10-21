@@ -115,8 +115,9 @@
         <div class="tp" data-tp="paredes" hidden>
           <div class="painel-head"><h2>Paredes</h2><button class="icon-btn so-mobile" data-fechar="ferr" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
           <p class="dica" id="dica-paredes">Escolha um acabamento e clique na parede no 3D.</p>
-          <div class="seg seg-full" id="esc-paredes" role="radiogroup" aria-label="Onde aplicar">
-            <button role="radio" data-esc="unico">Uma parede</button><button role="radio" data-esc="comodo">Cômodo</button><button role="radio" data-esc="todos">Todos</button>
+          <h3 class="sub">Ao clicar numa parede, pintar</h3>
+          <div class="esc-lista" id="esc-paredes" role="radiogroup" aria-label="O que o clique pinta">
+            <button role="radio" data-esc="unico"><i></i>Só a parede clicada</button><button role="radio" data-esc="comodo"><i></i>Todas as paredes do cômodo</button><button role="radio" data-esc="todos"><i></i>Todas as paredes do apartamento (menos banheiros)</button>
           </div>
           <div class="seg seg-full" id="tab-paredes" role="tablist" aria-label="Tipo de acabamento">
             <button role="tab" data-pt="tinta">Tintas</button><button role="tab" data-pt="rev">Azulejos</button><button role="tab" data-pt="tex">Texturas</button><button role="tab" data-pt="rodape">Rodapé</button>
@@ -127,8 +128,9 @@
         <div class="tp" data-tp="piso" hidden>
           <div class="painel-head"><h2>Piso</h2><button class="icon-btn so-mobile" data-fechar="ferr" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
           <p class="dica">Escolha um piso e clique no cômodo, no 3D ou na planta.</p>
-          <div class="seg seg-full" id="esc-piso" role="radiogroup" aria-label="Onde aplicar">
-            <button role="radio" data-esc="comodo">Só este cômodo</button><button role="radio" data-esc="todos">Todos os cômodos</button>
+          <h3 class="sub">Ao clicar no piso, trocar</h3>
+          <div class="esc-lista" id="esc-piso" role="radiogroup" aria-label="O que o clique troca">
+            <button role="radio" data-esc="comodo"><i></i>Só o piso do cômodo clicado</button><button role="radio" data-esc="todos"><i></i>O piso do apartamento inteiro (menos banheiros)</button>
           </div>
           <div class="sw-area" id="sw-piso"></div>
         </div>
@@ -136,8 +138,9 @@
         <div class="tp" data-tp="teto" hidden>
           <div class="painel-head"><h2>Teto</h2><button class="icon-btn so-mobile" data-fechar="ferr" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
           <p class="dica">Escolha o tipo de forro e clique no cômodo. A vista passa para baixo do piso para mostrar o forro.</p>
-          <div class="seg seg-full" id="esc-teto" role="radiogroup" aria-label="Onde aplicar">
-            <button role="radio" data-esc="comodo">Só este cômodo</button><button role="radio" data-esc="todos">Todos os cômodos</button>
+          <h3 class="sub">Ao clicar no teto, trocar</h3>
+          <div class="esc-lista" id="esc-teto" role="radiogroup" aria-label="O que o clique troca">
+            <button role="radio" data-esc="comodo"><i></i>Só o teto do cômodo clicado</button><button role="radio" data-esc="todos"><i></i>O teto do apartamento inteiro (menos banheiros)</button>
           </div>
           <div class="teto-cards" id="teto-cards"></div>
           <div class="grupo" id="teto-rebaixo"><h3>Rebaixo</h3><div class="chips" id="teto-drops"></div></div>
@@ -156,7 +159,7 @@
 
         <div class="tp" data-tp="fixos" hidden>
           <div class="painel-head"><h2>Peças do apartamento</h2><button class="icon-btn so-mobile" data-fechar="ferr" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
-          <p class="dica">Pia, tanque, louças, box, portas e janelas também podem ser trocados. Mudar o modelo ou a cor é só estética; mudar o ponto hidráulico de lugar exige obra e autorização.</p>
+          <p class="dica">Pia, tanque, louças, box, portas e janelas: troque modelo e cor, mova, gire, oculte ou retire. No 3D, clique na peça (ou mire nela no Passeio) para editar só ela.</p>
           <div id="fixos-corpo"></div>
         </div>
 
@@ -250,6 +253,13 @@
       <!-- inspetor do móvel selecionado -->
       <aside class="painel inspetor" id="inspetor" aria-label="Detalhes do móvel">
         <div id="insp-item"></div>
+        <div id="insp-cartao" class="insp cartao" hidden>
+          <div class="insp-head">
+            <div class="painel-head"><h2 id="cartao-tit"></h2><button class="icon-btn" id="cartao-x" aria-label="Fechar edição" title="Fechar (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
+            <span id="cartao-sub"></span>
+          </div>
+          <div id="cartao-corpo"></div>
+        </div>
       </aside>
     </div>
 

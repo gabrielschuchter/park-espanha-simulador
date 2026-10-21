@@ -252,6 +252,12 @@ export function createPlan2D(host, opts = {}) {
     h = '';
     for (const o of plan.openings) {
       const w = o.w, half = w.t / 2;
+      if (o.sem) {
+        // vão sem porta ou sem janela: só a soleira tracejada
+        const a = wallPoint(w, o.s0, 0), b = wallPoint(w, o.s1, 0);
+        h += `<line class="vao-livre" x1="${f2(a[0])}" y1="${f2(a[1])}" x2="${f2(b[0])}" y2="${f2(b[1])}" />`;
+        continue;
+      }
       if (!o.porta) {
         // janela: três linhas paralelas
         for (const k of [-half, 0, half]) {
@@ -284,7 +290,7 @@ export function createPlan2D(host, opts = {}) {
     let h = '';
     for (const f of plan.fixos) {
       if (f.oculto) continue;
-      h += `<g transform="translate(${f2(f.x)} ${f2(f.y)}) rotate(${f.rot || 0})" class="fixo">${simboloFixo(f)}</g>`;
+      h += `<g transform="translate(${f2(f.x)} ${f2(f.y)}) rotate(${f.rot || 0})" class="fixo${f.movido ? ' movido' : ''}" data-fix="${f.id}">${simboloFixo(f)}</g>`;
     }
     L.fix.innerHTML = h;
   }
@@ -537,6 +543,11 @@ export function createPlan2D(host, opts = {}) {
       const k = hEl.dataset.h;
       if (k === 'rot') drag = { kind: 'rot', uid: sel.uid, rot0: sel.rot };
       else drag = { kind: 'resize', uid: sel.uid, k, start: { ...sel } };
+    } else if (!itEl && ev.target.closest('.fixo') && ev.button !== 1 && !['paredes', 'piso', 'teto'].includes(ferramenta)) {
+      // peça da construtora: arrasta como móvel; toque sem arrasto abre a edição
+      const id = ev.target.closest('.fixo').dataset.fix, f = plan.fixos.find((x) => x.id === id);
+      const [wx, wy] = S2W(...p);
+      drag = { kind: 'fix', id, ox: f.x - wx, oy: f.y - wy, sx: p[0], sy: p[1], moved: false, rot: f.rot || 0 };
     } else if (itEl && ev.button !== 1) {
       const uid = itEl.dataset.uid;
       select(uid);
@@ -571,6 +582,14 @@ export function createPlan2D(host, opts = {}) {
       aplicarView(); return;
     }
     const [wx, wy] = S2W(...p);
+    if (drag.kind === 'fix') {
+      if (!drag.moved && Math.hypot(p[0] - drag.sx, p[1] - drag.sy) < 3) return;
+      if (!drag.moved) opts.onPegar?.('move');
+      drag.moved = true;
+      const x = Math.round((wx + drag.ox) * 100) / 100, y = Math.round((wy + drag.oy) * 100) / 100;
+      live((proj) => { proj.fix[drag.id] = { ...(proj.fix[drag.id] || {}), pos: { x, y, rot: drag.rot } }; }, 'fixpos');
+      return;
+    }
     if (drag.kind === 'move') {
       if (!drag.moved && Math.hypot(p[0] - drag.sx, p[1] - drag.sy) < 3) return;
       if (!drag.moved) opts.onPegar?.('move', store.projeto.itens.find((i) => i.uid === drag.uid));
@@ -621,6 +640,11 @@ export function createPlan2D(host, opts = {}) {
         else if (!sup) select(null);
       }
       drag = null; aplicarView(); return;
+    }
+    if (drag.kind === 'fix') {
+      const d = drag; drag = null;
+      if (d.moved) { commit(); opts.onFixoMovido?.(d.id); } else opts.onFixoClick?.(d.id);
+      return;
     }
     commit();
     const feito = drag;

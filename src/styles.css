@@ -391,7 +391,10 @@ input[type=range] { accent-color: var(--sel); width: 100%; }
 .plan-svg[data-tool="paredes"] .room-hit:hover, .plan-svg[data-tool="piso"] .room-hit:hover, .plan-svg[data-tool="teto"] .room-hit:hover { fill: color-mix(in srgb, var(--sel) 24%, transparent); }
 .room-hit.pulso { animation: pulso .6s ease-out; }
 @keyframes pulso { 0% { fill: color-mix(in srgb, var(--sel) 55%, transparent); } 100% { fill: transparent; } }
-.l-walls, .l-open, .l-fix { pointer-events: none; }
+.l-walls, .l-open { pointer-events: none; }
+.l-fix { pointer-events: none; }
+.l-fix .fixo { pointer-events: auto; }
+.plan-svg[data-tool="paredes"] .fixo, .plan-svg[data-tool="piso"] .fixo, .plan-svg[data-tool="teto"] .fixo { pointer-events: none; }
 .plan-svg[data-det="baixo"] .mv-line { opacity: 0; }
 .plan-svg[data-det="baixo"] .mv-line.cortina { opacity: 1; }
 .mv-luz { fill: color-mix(in srgb, #f4c95d 55%, var(--room)); stroke: var(--ink); stroke-width: .9px; vector-effect: non-scaling-stroke; }
@@ -653,4 +656,75 @@ input[type=range] { accent-color: var(--sel); width: 100%; }
 @media (max-width: 860px) {
   /* com o painel de ferramentas aberto o 3D fica baixo: as ações da mira não cabem acima do joystick */
   .workspace[data-ferr="1"] .acoes-passeio, .workspace[data-insp="1"] .acoes-passeio { display: none; }
+}
+.fixo { cursor: grab; }
+.fixo.movido .fx-body { stroke: var(--accent); }
+.vao-livre { stroke: var(--ink-2); stroke-width: 1.2px; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+
+/* Passeio com cursor preso: as ações ficam no clique e nas teclas; os botões só atrapalham */
+.cursor-preso .acoes-passeio { display: none !important; }
+.cursor-preso .gl-host { cursor: none; }
+.acoes-passeio .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* cartão de edição de uma peça, abertura ou superfície (no lugar do inspetor) */
+.cartao .painel-head h2 { margin: 0; font-size: 17px; line-height: 1.25; }
+.cartao #cartao-sub { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+#cartao-corpo { display: grid; gap: 12px; margin-top: 12px; }
+.ce-acoes { display: flex; flex-wrap: wrap; gap: 6px; }
+.esc-lista { display: grid; gap: 6px; }
+.esc-lista button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel); font: inherit; font-size: 14px; color: var(--ink); cursor: pointer; min-height: 44px; }
+.esc-lista button i { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--ink-2); flex: none; }
+.esc-lista button[aria-checked="true"] { border-color: var(--sel); background: color-mix(in srgb, var(--sel) 8%, var(--panel)); font-weight: 600; }
+.esc-lista button[aria-checked="true"] i { border-color: var(--sel); background: radial-gradient(circle, var(--sel) 0 45%, transparent 50%); }
+#cartao-corpo .teto-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (min-width: 861px) {
+  /* colunas fixas: com o painel da ferramenta fechado, o 3D continua na coluna do meio */
+  .workspace > #rail { grid-column: 1; }
+  .workspace > .ferr { grid-column: 2; }
+  .workspace > .palco { grid-column: 3; }
+  .workspace > .inspetor { grid-column: 4; }
+  .workspace > * { grid-row: 1; }
+}
+.inspetor { min-width: 0; overflow-x: hidden; }
+#cartao-corpo, #cartao-corpo > * { min-width: 0; }
+#cartao-corpo .opc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cartao .btn { white-space: normal; text-align: left; }
+.cartao .painel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+
+/* ---------- iPhone e Safari móvel ---------- */
+/* altura real da tela visível (a barra do Safari aparece e some); 100% fica como reserva */
+@supports (height: 100dvh) {
+  #app, .editor { height: 100dvh; }
+  .home { min-height: 100dvh; }
+}
+/* entalhe: o conteúdo começa abaixo dele (viewport-fit=cover) */
+.editor { padding-top: env(safe-area-inset-top, 0px); }
+.home { padding-top: env(safe-area-inset-top, 0px); }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+@media (max-width: 860px) {
+  /* campos abaixo de 16 px fazem o Safari dar zoom ao tocar, e a tela fica deslocada */
+  input, select, textarea, .campo, .campo-sm { font-size: 16px !important; }
+  @supports (height: 100dvh) {
+    .ferr, .inspetor { max-height: 46dvh; }
+  }
+  .inspetor { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
+  .cam-ctl { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .cam-ctl::-webkit-scrollbar { display: none; }
+  .cam-ctl > * { flex: none; }
+  .joy { left: max(18px, env(safe-area-inset-left, 0px)); bottom: max(22px, env(safe-area-inset-bottom, 0px)); }
+  .acoes-passeio { max-width: calc(100% - 24px); }
+  .esc-lista button { font-size: 15px; }
+  .proj-nome { max-width: 46vw; }
+}
+/* paisagem no celular: pouca altura, então painéis mais baixos */
+@media (max-width: 960px) and (max-height: 500px) and (orientation: landscape) {
+  :root { --top-h: 46px; }
+  .ferr, .inspetor { max-height: 60dvh; }
+  .bottom-bar button span { display: none; }
+}
+@media (max-width: 860px) {
+  /* com o cartão ou o painel aberto o 3D fica baixo: controles menores e só o essencial */
+  .workspace[data-insp="1"] .zoom3d, .workspace[data-ferr="1"] .zoom3d { display: none; }
+  .workspace[data-insp="1"] .joy, .workspace[data-ferr="1"] .joy { width: 96px; height: 96px; bottom: 10px; }
+  .workspace[data-insp="1"] .joy-knob, .workspace[data-ferr="1"] .joy-knob { width: 40px; height: 40px; margin: -20px 0 0 -20px; }
 }

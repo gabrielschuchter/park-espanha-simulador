@@ -14,6 +14,9 @@ export const TIPOS_ABERTURA = {
   P3A: { nome: 'Porta da varanda', largura: 0.70, altura: 2.10, src: 'est' },
   P5: { nome: 'Porta de correr da varanda', largura: 1.50, altura: 2.10, src: 'est' },
   P8: { nome: 'Porta de entrada', largura: 0.80, altura: 2.10, src: 'est' },
+  P2: { nome: 'Porta do banheiro acessível', largura: 0.90, altura: 2.10, src: 'est' }, // vão livre ≥ 0,80 m (NBR 9050)
+  P1A: { nome: 'Porta interna acessível', largura: 0.90, altura: 2.10, src: 'est' }, // PCD: folha de 90 para vão livre de cerca de 80 cm
+  P8A: { nome: 'Porta de entrada acessível', largura: 0.90, altura: 2.10, src: 'est' },
   J1: { nome: 'Janela basculante do banheiro', largura: 0.60, altura: 0.60, peitoril: 1.50, src: 'est' },
   J2: { nome: 'Janela de correr', largura: 1.20, altura: 1.10, peitoril: 1.00, src: 'est' },
 };
@@ -204,12 +207,47 @@ const ponta = {
 // ---------------------------------------------------------------- PCD (pendente)
 // Unidades 001, 101, 201, 301 (e 401 nas torres B e C) são PCD segundo o memorial.
 // A planta oficial ainda não foi localizada: nenhuma geometria é inventada aqui.
+// ---------------------------------------------------------------- PCD
+// Base: planta humanizada da unidade PCD enviada pelo morador (sem cotas de parede nem área). É a Ponta com os dois
+// banheiros fundidos num banheiro acessível de 2,00 × 2,35 m. Cotas internas lidas na imagem ('doc'); posição de
+// louças, janelas e porta do banheiro medidas na imagem ('est'). Ver docs/HIPOTESES.md.
+const semBanhos = (l) => l.filter((x) => !['p-banho-esq', 'p-banho-meio', 'p-banho-baixo'].includes(x.id));
 const pcd = {
+  ...ponta,
   id: 'pcd',
   nome: 'PCD',
   titulo: 'Tipologia PCD',
-  pendente: true,
-  resumo: 'Unidades 001, 101, 201 e 301 de cada torre (memorial descritivo). Aguardando a planta oficial.',
+  areaPrivativa: 45.04, areaEstimada: true,
+  resumo: '2 quartos · 1 banheiro acessível · sala e cozinha integradas · unidades 001, 101, 201 e 301',
+  walls: [
+    ...semBanhos(ponta.walls),
+    W('p-banho-esq', -1.125, 2.40, -1.125, 5.05),
+    W('p-banho-baixo', -1.20, 4.975, 1.10, 4.975),
+  ],
+  openings: [
+    // portas mais largas que na Ponta: vão livre mínimo de 0,80 m (NBR 9050); a posição ao longo da parede é a mesma
+    ...ponta.openings.filter((o) => !['J1-b1', 'J1-b2', 'P1-b1', 'P1-b2'].includes(o.id)).map((o) => (o.tipo === 'P1' ? { ...o, tipo: 'P1A', de: o.id === 'P1-qa' ? o.de - 0.20 : o.de } : o.tipo === 'P8' ? { ...o, tipo: 'P8A', de: o.de - 0.10 } : o)),
+    { id: 'J1-b1', wall: 'p-banho-esq', tipo: 'J1', de: 0.45 },
+    { id: 'J1-b2', wall: 'p-banho-esq', tipo: 'J1', de: 1.50 },
+    { id: 'P2-b', wall: 'p-banho-dir', tipo: 'P2', de: 0.15, dobradica: 'b', abre: 1, rotulo: 'Banheiro' },
+  ],
+  rooms: [
+    ...ponta.rooms.filter((r) => r.id !== 'b1' && r.id !== 'b2'),
+    { id: 'b1', nome: 'Banheiro acessível', piso: 'ceramico', area: 4.70, areaGeom: true, banho: true,
+      poly: [[-1.05, 2.55], [0.95, 2.55], [0.95, 4.90], [-1.05, 4.90]] },
+  ],
+  fixos: [
+    ...ponta.fixos.filter((f) => ['pia', 'tanque'].includes(f.id)),
+    { id: 'lav1', tipo: 'lavatorio', nome: 'Lavatório (sem coluna)', x: -0.85, y: 3.15, w: 0.45, d: 0.40, rot: 270, h: 0.80, src: 'est', padrao: { modelo: 'suspenso' } },
+    { id: 'vaso1', tipo: 'vaso', nome: 'Bacia sanitária', x: 0.45, y: 4.575, w: 0.38, d: 0.65, rot: 180, h: 0.46, src: 'est' },
+    { id: 'box1', tipo: 'box', nome: 'Área do chuveiro', x: -0.60, y: 4.425, w: 0.95, d: 0.90, rot: 90, h: 0.02, src: 'est', padrao: { modelo: 'cortina' } },
+  ],
+  cotas: [
+    ...ponta.cotas.filter((c) => !['1,95', '1,10'].includes(c[0]) && !(c[0] === '3,25')),
+    ['2,00', -1.05, 2.55, 0.95, 2.55, 0.20],
+    ['2,35', 0.95, 2.55, 0.95, 4.90, -0.20],
+    ['3,26', 3.50, 3.75, 3.50, 7.00, -0.20],
+  ],
   requisitos: {
     referencia: 'ABNT NBR 9050',
     giro360: 1.50, // diâmetro de manobra em cadeira de rodas sem deslocamento

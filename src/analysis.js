@@ -56,7 +56,7 @@ export function analisar(plan, itens) {
     // portas
     if (it.elev < 2.0) {
       for (const o of plan.openings) {
-        if (!o.sweep) continue;
+        if (!o.sweep || o.sem) continue; // porta retirada não gira
         if (convexOverlap(A.poly, o.sweep) > 0.02) {
           add('aviso', it.uid, `${nomeCurto(it)} bloqueia ${portaFrase(o)}.`, o.sweep);
         }
@@ -65,7 +65,7 @@ export function analisar(plan, itens) {
     // janelas
     if (it.tipo !== 'cortina') {
       for (const o of plan.openings) {
-        if (o.porta) continue;
+        if (o.porta || o.sem) continue;
         const topoJ = o.peitoril + o.altura;
         if (A.z1 < o.peitoril + 0.08 || A.z0 > topoJ) continue;
         const faixa = wallSpanPoly(o.w, o.s0 + 0.1, o.s1 - 0.1, 0.25);

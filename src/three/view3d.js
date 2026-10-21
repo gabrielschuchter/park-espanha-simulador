@@ -7,7 +7,7 @@ import { wallInfo, wallPoint, rectCorners, pointInPoly, rad, deg, bbox, rayPolys
 import { catalogoPorId } from '../data/catalogo.js';
 import { buildFurniture, mat } from './furniture3d.js';
 import { buildFixture, vidro } from './fixos3d.js';
-import { opcoesDe, abDe } from '../data/fixos.js';
+import { opcoesDe, abDe, abDeAbertura } from '../data/fixos.js';
 import { texCeu, texAcab } from './textures.js';
 import { store, live, commit, select, estadoDe } from '../store.js';
 import { aplicarEstado } from './helpers3d.js';
@@ -191,11 +191,20 @@ export function createView3D(container, opts = {}) {
       if (g.userData.partes) aplicarEstado(g, estadoDe({}));
     }
   }
+  // depois de mover uma peça (arrasto ou carry), só reposiciona os grupos, sem reconstruir
+  function posicionarFixos() {
+    for (const g of fixosG) {
+      const f = plan.fixos.find((x) => x.id === g.userData.fixo); if (!f) continue;
+      g.position.set(f.x, 0, f.y); g.rotation.y = -rad(f.rot || 0);
+      if (!(carry.ativo && carry.fixo === f.id)) g.visible = !f.oculto && mode !== 'forro';
+    }
+    dirty = true;
+  }
   function construirAberturas() {
     for (const g of aberturasG) descartar(g);
     aberturasG = [];
-    const H = plan.tip.peDireito, ab = abDe(store.projeto?.fix);
-    for (const o of plan.openings) { const g = construirAbertura(o, H, ab); g.traverse((q) => { q.userData.aberturaId = o.id; }); wallGroups.get(o.wall).g.add(g); aberturasG.push(g); }
+    const H = plan.tip.peDireito, fix = store.projeto?.fix;
+    for (const o of plan.openings) { o.sem = !!fix?.[o.id]?.sem; const g = construirAbertura(o, H, abDeAbertura(fix, o)); g.traverse((q) => { q.userData.aberturaId = o.id; }); wallGroups.get(o.wall).g.add(g); aberturasG.push(g); }
   }
 
   function construirAbertura(o, H, ab = abDe(null)) {
@@ -203,12 +212,26 @@ export function createView3D(container, opts = {}) {
     const w = o.w, wi = wallInfo(w);
     const alu = mat('laca', ab.esquadria);
     const vid = vidro(ab.vidro);
+    if (o.sem) {
+      // porta retirada: fica o batente e a soleira; janela ou porta de correr oculta: só a soleira ou o peitoril
+      if (o.porta && !o.correr) {
+        for (const s of [o.s0, o.s1]) { const j = boxWall(w, s - 0.02, s + 0.02, 0, o.altura + 0.03, mat('laca', '#f4f2ee'), w.t + 0.02); if (j) g.add(j); }
+        const vt = boxWall(w, o.s0 - 0.02, o.s1 + 0.02, o.altura, o.altura + 0.04, mat('laca', '#f4f2ee'), w.t + 0.02); if (vt) g.add(vt);
+      }
+      const so = o.porta ? boxWall(w, o.s0, o.s1, 0, 0.006, mat('granito'), w.t) : boxWall(w, o.s0 - 0.03, o.s1 + 0.03, o.peitoril - 0.02, o.peitoril, mat('granito'), w.t + 0.06);
+      if (so) g.add(so);
+      // caixa invisível no vão, só para a mira e o clique acharem a abertura (e poder recolocar)
+      const z0 = o.porta ? 0 : o.peitoril, z1 = o.porta ? o.altura : o.peitoril + o.altura;
+      const alvo = boxWall(w, o.s0, o.s1, z0, z1, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }), 0.02);
+      if (alvo) { alvo.castShadow = false; alvo.userData.alvoInvisivel = true; g.add(alvo); }
+      return g;
+    }
     if (o.porta && !o.correr) {
       for (const s of [o.s0, o.s1]) { const j = boxWall(w, s - 0.02, s + 0.02, 0, o.altura + 0.03, mat('laca', '#f4f2ee'), w.t + 0.02); if (j) g.add(j); }
       const vt = boxWall(w, o.s0 - 0.02, o.s1 + 0.02, o.altura, o.altura + 0.04, mat('laca', '#f4f2ee'), w.t + 0.02); if (vt) g.add(vt);
       const so = boxWall(w, o.s0, o.s1, 0, 0.006, mat('granito'), w.t); if (so) g.add(so);
       const larg = o.largura - 0.03;
-      const folha = new THREE.Mesh(new THREE.BoxGeometry(larg, o.altura - 0.01, 0.035), o.entrada ? mat('madeira', ab.entrada) : mat('laca', ab.porta));
+      const folha = new THREE.Mesh(new THREE.BoxGeometry(larg, o.altura - 0.01, 0.035), o.entrada ? mat('madeira', ab.folha) : mat('laca', ab.folha));
       const dir = [o.open[0] - o.hinge[0], o.open[1] - o.hinge[1]];
       const L = Math.hypot(...dir), ux = dir[0] / L, uy = dir[1] / L;
       const cx = o.hinge[0] + ux * (larg / 2 + 0.02);
@@ -671,6 +694,7 @@ export function createView3D(container, opts = {}) {
   }
   function aplicarModo(inicial = false) {
     autoFit = true;
+    if (mode !== 'passeio' && document.pointerLockElement === renderer.domElement) document.exitPointerLock();
     const ir = (pos, alvo) => { if (inicial) { anim = null; camera.position.copy(pos); controls.target.copy(alvo); dirty = true; } else animarCamera(pos, alvo); };
     const forro = mode === 'forro';
     tetosG.visible = mode === 'passeio' || forro;
@@ -929,24 +953,27 @@ export function createView3D(container, opts = {}) {
   function nomeAbertura(id) {
     const o = plan.openings.find((x) => x.id === id); if (!o) return 'Abertura';
     const porta = /^P/.test(o.tipo);
-    return `${porta ? 'Porta' : 'Janela'}${o.rotulo ? ' · ' + o.rotulo : ''}`;
+    return `${porta ? 'Porta' : 'Janela'}${o.rotulo ? ' · ' + o.rotulo : ''}${o.sem ? (porta ? ' (retirada)' : ' (oculta)') : ''}`;
   }
   function descreverAlvo(a) {
     if (!a) return null;
     if (a.kind === 'item') { const it = store.projeto.itens.find((i) => i.uid === a.uid); return it ? { ...a, nome: it.nome, estados: estadosDoItem(a.uid), livre: !!catalogoPorId[it.tipo]?.teto } : null; }
     if (a.kind === 'fixo') { const f = plan.fixos.find((x) => x.id === a.id); return f ? { ...a, nome: f.nome } : null; }
     if (a.kind === 'abertura') return { ...a, nome: nomeAbertura(a.id) };
+    if (a.kind === 'interruptor') { const r = plan.rooms.find((q) => q.id === a.room); return { ...a, nome: `Interruptor · ${r?.nome || ''}` }; }
     if (a.kind === 'superficie') { const r = plan.rooms.find((q) => q.id === a.room); return { ...a, nome: `${{ parede: 'Parede', piso: 'Piso', teto: 'Teto' }[a.tipo]}${r ? ' · ' + r.nome : ''}` }; }
     return null;
   }
   function alvoDoRaio(rc, { maxObj = Infinity, maxSup = Infinity } = {}) {
-    const lista = [...moveis.children, ...fixosG, ...aberturasG, ...peleMeshes, ...pisoMeshes, ...caixasParede];
+    const lista = [...swMeshes, ...moveis.children, ...fixosG, ...aberturasG, ...peleMeshes, ...pisoMeshes, ...caixasParede];
     if (tetosG.visible) lista.push(...tetoMeshes);
     for (const h of rc.intersectObjects(lista, true)) {
       if (!visivelDe(h.object)) continue;
       const u = h.object.userData;
+      if (u.sw) return h.distance <= maxObj ? { kind: 'interruptor', room: u.sw, id: 'sw-' + u.sw, dist: h.distance } : null;
       if (u.uid) return h.distance <= maxObj ? { kind: 'item', uid: u.uid, dist: h.distance, point: h.point } : null;
       if (u.fixoId) return h.distance <= maxObj ? { kind: 'fixo', id: u.fixoId, dist: h.distance, point: h.point } : null;
+      if (u.alvoInvisivel && h.distance > 1.6) continue; // vão sem porta: de longe, olha através dele
       if (u.aberturaId) return h.distance <= maxObj ? { kind: 'abertura', id: u.aberturaId, dist: h.distance, point: h.point } : null;
       if (u.surface) return h.distance <= maxSup && u.room ? { kind: 'superficie', tipo: u.surface, room: u.room, edge: u.edge, dist: h.distance, point: h.point } : null;
       if (h.object.material && h.object.material.transparent && h.object.material.opacity < 0.3) continue;
@@ -964,28 +991,28 @@ export function createView3D(container, opts = {}) {
 
   // realce da superfície sob o cursor
   const matAlvo = new THREE.MeshBasicMaterial({ color: '#27a9d3', transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
-  function roomsDoEscopo(info) {
-    if (escopo === 'todos') return plan.rooms.filter((r) => !r.banho || r.id === info.room);
+  function roomsDoEscopo(info, esc = escopo) {
+    if (esc === 'todos') return plan.rooms.filter((r) => !r.banho || r.id === info.room);
     return plan.rooms.filter((r) => r.id === info.room);
   }
-  function montarAlvo(info, material = matAlvo) {
+  function montarAlvo(info, material = matAlvo, esc = escopo) {
     const g = new THREE.Group();
     const H = plan.tip.peDireito, A = acab();
     if (info.tipo === 'piso') {
-      for (const r of roomsDoEscopo(info)) {
+      for (const r of roomsDoEscopo(info, esc)) {
         const sh = new THREE.Shape(r.poly.map(([x, y]) => new THREE.Vector2(x, -y)));
         const m = new THREE.Mesh(new THREE.ShapeGeometry(sh), material); m.rotation.x = -Math.PI / 2; m.position.y = 0.006; g.add(m);
       }
     } else if (info.tipo === 'teto') {
-      for (const r of roomsDoEscopo(info)) {
+      for (const r of roomsDoEscopo(info, esc)) {
         const sh = new THREE.Shape(r.poly.map(([x, y]) => new THREE.Vector2(x, y)));
         const m = new THREE.Mesh(new THREE.ShapeGeometry(sh), material); m.rotation.x = Math.PI / 2; m.position.y = tetoMin(plan, A, r) - 0.01; g.add(m);
       }
     } else if (info.tipo === 'parede') {
-      for (const r of roomsDoEscopo(info)) {
+      for (const r of roomsDoEscopo(info, esc)) {
         for (const bd of bordasComodo(plan, r)) {
-          if (!bd.parede && !(escopo === 'unico' && bd.i === info.edge && r.id === info.room)) continue;
-          if (escopo === 'unico' && !(bd.i === info.edge && r.id === info.room)) continue;
+          if (!bd.parede && !(esc === 'unico' && bd.i === info.edge && r.id === info.room)) continue;
+          if (esc === 'unico' && !(bd.i === info.edge && r.id === info.room)) continue;
           const off = 0.009, a = [bd.p[0] + bd.nx * off, bd.p[1] + bd.ny * off], b = [bd.q[0] + bd.nx * off, bd.q[1] + bd.ny * off];
           const pos = new Float32Array([a[0], 0, a[1], b[0], 0, b[1], b[0], H, b[1], a[0], H, a[1]]);
           const geo = new THREE.BufferGeometry();
@@ -996,14 +1023,19 @@ export function createView3D(container, opts = {}) {
     }
     return g;
   }
+  // realce fixo do que o cartão de edição está alterando (fica mesmo sem o cursor em cima)
+  let cartaoAlvo = null, cartaoEsc = 'unico';
   function mostrarHover(info) {
-    const key = info ? `${info.tipo}|${info.room}|${info.edge}|${escopo}` : '';
+    const usaCartao = !info && cartaoAlvo;
+    const esc = usaCartao ? cartaoEsc : escopo, inf = usaCartao ? cartaoAlvo : info;
+    const key = inf ? `${inf.tipo}|${inf.room}|${inf.edge}|${esc}|${usaCartao ? 'c' : ''}` : '';
     if (key === hoverKey) return;
     hoverKey = key; hoverInfo = info;
     limpar(alvoG);
-    if (info) alvoG.add(montarAlvo(info));
+    if (inf) alvoG.add(montarAlvo(inf, matAlvo, esc));
     requestRender();
   }
+  function realcarCartao(info, esc) { cartaoAlvo = info && ['parede', 'piso', 'teto'].includes(info.tipo) ? info : null; cartaoEsc = esc || 'unico'; hoverKey = '__'; mostrarHover(hoverInfo); }
   let flash = null;
   function pulsar(info) {
     const m = matAlvo.clone(); m.color.set('#ffffff'); m.opacity = 0.7;
@@ -1021,7 +1053,42 @@ export function createView3D(container, opts = {}) {
     return `Parede · ${r.nome}${f.t === 'tex' ? ' · ' + (texParedePorId[f.id]?.nome || '') : ''}`;
   }
 
+  // ------------------------------------------------------------ Passeio: cursor preso (computador) e ação só na mira
+  // Com o cursor preso, mover o mouse olha e o clique age sobre o que está no centro da tela.
+  // Arrastar nunca dispara ação; no toque, quem age são os botões da mira.
+  let travaFalhou = false;
+  const cursorPreso = () => document.pointerLockElement === el;
+  function prenderCursor() {
+    if (travaFalhou || cursorPreso() || mode !== 'passeio') return;
+    try { const r = el.requestPointerLock?.(); if (r?.catch) r.catch(() => { travaFalhou = true; opts.onCursor?.(false, true); }); } catch { travaFalhou = true; }
+  }
+  function soltarCursor() { if (cursorPreso()) document.exitPointerLock(); }
+  document.addEventListener('pointerlockchange', () => { walk.keys.delete('mouse'); opts.onCursor?.(cursorPreso(), travaFalhou); if (!cursorPreso()) opts.onHover?.(null); });
+  document.addEventListener('pointerlockerror', () => { travaFalhou = true; opts.onCursor?.(false, true); });
+  function centroTela() { const r = el.getBoundingClientRect(); return { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }; }
+  // ação no que está na mira: confirmar o móvel carregado, pintar com a ferramenta ativa, acender a luz ou abrir a edição
+  function acaoNaMira() {
+    if (carry.ativo) { confirmarCarry(); return; }
+    const c = centroTela();
+    const sw = pickInterruptor(c);
+    if (sw) { opts.onInterruptor?.(sw); return; }
+    if (superficieDaFerramenta()) { const info = pickSuperficie(c); if (info) { mostrarHover(info); opts.onSuperficie?.(info, { escopo }); } return; }
+    apontar(c);
+    const a = descreverAlvo(alvoDoRaio(ray, { maxObj: 3.4, maxSup: 5 }));
+    if (a) opts.onEditar?.(a);
+  }
+  // sem cursor preso (navegador recusou), o clique age no ponto clicado
+  function acaoNoPonto(ev) {
+    if (carry.ativo) { confirmarCarry(); return; }
+    const sw = pickInterruptor(ev);
+    if (sw) { opts.onInterruptor?.(sw); return; }
+    if (superficieDaFerramenta()) { const info = pickSuperficie(ev); if (info) { mostrarHover(info); opts.onSuperficie?.(info, { escopo }); } return; }
+    apontar(ev);
+    const a = descreverAlvo(alvoDoRaio(ray, { maxObj: 9, maxSup: 9 }));
+    if (a) opts.onEditar?.(a);
+  }
   el.addEventListener('pointerdown', (ev) => {
+    if (mode === 'passeio' && cursorPreso()) { if (ev.button === 0) acaoNaMira(); ev.preventDefault(); return; }
     if (mode === 'passeio') {
       ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       el.setPointerCapture(ev.pointerId);
@@ -1049,9 +1116,22 @@ export function createView3D(container, opts = {}) {
       select(uid);
       const p = pontoPiso(ev, it.elev || 0);
       if (p) { drag = { kind: 'move', uid, dx: it.x - p.x, dz: it.y - p.z, moved: false, ox: it.x, oy: it.y }; controls.enabled = false; el.setPointerCapture(ev.pointerId); }
+      return;
+    }
+    // peça da construtora: arrasta pelo piso como um móvel (o clique sem arrasto abre a edição)
+    apontar(ev);
+    const a = alvoDoRaio(ray, { maxSup: -1 });
+    if (a?.kind === 'fixo') {
+      const f = plan.fixos.find((x) => x.id === a.id), p = pontoPiso(ev, 0);
+      if (f && p) { drag = { kind: 'fix', id: f.id, dx: f.x - p.x, dz: f.y - p.z, moved: false, ox: f.x, oy: f.y, sx: ev.clientX, sy: ev.clientY }; controls.enabled = false; el.setPointerCapture(ev.pointerId); }
     }
   });
   el.addEventListener('pointermove', (ev) => {
+    if (mode === 'passeio' && cursorPreso()) {
+      const k = 0.0032 * (camera.fov / fovAuto());
+      walk.yawT += (ev.movementX || 0) * k; walk.pitchT = Math.max(-1.25, Math.min(1.25, walk.pitchT - (ev.movementY || 0) * k));
+      dirty = true; return;
+    }
     if (mode === 'passeio') {
       if (ptrs.has(ev.pointerId)) ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       if (pinca && ptrs.size >= 2) {
@@ -1074,6 +1154,15 @@ export function createView3D(container, opts = {}) {
         down.lx = ev.clientX; down.ly = ev.clientY; down.lt = agora;
         dirty = true; return;
       }
+    }
+    if (drag?.kind === 'fix') {
+      if (!drag.moved && Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) < 6) return;
+      const p = pontoPiso(ev, 0); if (!p) return;
+      if (!drag.moved) { drag.moved = true; opts.onPegar?.('move'); }
+      const f = plan.fixos.find((x) => x.id === drag.id);
+      const x = Math.round((p.x + drag.dx) * 100) / 100, y = Math.round((p.z + drag.dz) * 100) / 100;
+      live((proj) => { proj.fix[drag.id] = { ...(proj.fix[drag.id] || {}), pos: { x, y, rot: f.rot || 0 } }; }, 'fixpos');
+      return;
     }
     if (drag) {
       const it = store.projeto.itens.find((i) => i.uid === drag.uid); if (!it) return;
@@ -1101,7 +1190,7 @@ export function createView3D(container, opts = {}) {
       return;
     }
     // sem arrasto: realce do que está sob o cursor (mouse)
-    if (ev.pointerType === 'mouse' || mode === 'passeio') {
+    if (ev.pointerType === 'mouse' && !cursorPreso()) {
       hoverPend = ev;
     }
   });
@@ -1125,11 +1214,11 @@ export function createView3D(container, opts = {}) {
       const a = descreverAlvo(alvoDoRaio(ray, { maxObj: mode === 'passeio' ? 9 : Infinity, maxSup: -1 }));
       if (!a) { el.style.cursor = ''; opts.onHover?.(null); return; }
       if (a.kind === 'item') { el.style.cursor = mode === 'passeio' ? 'pointer' : 'grab'; const rr = el.getBoundingClientRect(); if (mode === 'passeio' && Math.hypot(ev.clientX - rr.left - rr.width / 2, ev.clientY - rr.top - rr.height / 2) < 60) { opts.onHover?.(null); return; } opts.onHover?.(`${a.nome} · ${mode === 'passeio' ? 'clique para editar' : 'arraste para mover, clique para editar'}`, ev.clientX, ev.clientY); return; }
-      el.style.cursor = 'pointer';
+      el.style.cursor = a.kind === 'fixo' && mode !== 'passeio' ? 'grab' : 'pointer';
       // no Passeio, perto do centro a mira já mostra o mesmo nome
       const rr = el.getBoundingClientRect();
       if (mode === 'passeio' && Math.hypot(ev.clientX - rr.left - rr.width / 2, ev.clientY - rr.top - rr.height / 2) < 60) { opts.onHover?.(null); return; }
-      opts.onHover?.(`${a.nome} · clique para editar`, ev.clientX, ev.clientY);
+      opts.onHover?.(`${a.nome} · ${a.kind === 'fixo' && mode !== 'passeio' ? 'arraste para mover, clique para editar' : 'clique para editar'}`, ev.clientX, ev.clientY);
     }
   }
   // duplo clique ou duplo toque: aproxima do ponto tocado; se já está perto, volta ao enquadramento geral
@@ -1153,6 +1242,17 @@ export function createView3D(container, opts = {}) {
       }
     }
     const tap = down && Math.hypot(ev.clientX - down.x, ev.clientY - down.y) < 6 && ev.timeStamp - down.t < 450;
+    if (mode === 'passeio' && !cursorPreso()) {
+      // toque rápido no Passeio: no mouse, prende o cursor; no dedo, não faz nada (as ações ficam nos botões da mira)
+      if (tap && ev.pointerType === 'mouse') { if (travaFalhou) acaoNoPonto(ev); else prenderCursor(); }
+      down = null; return;
+    }
+    if (drag?.kind === 'fix') {
+      const d = drag; drag = null; controls.enabled = mode !== 'passeio';
+      if (d.moved) { commit(); opts.onFixoMovido?.(d.id); }
+      else opts.onEditar?.({ kind: 'fixo', id: d.id });
+      down = null; return;
+    }
     if (drag) {
       const d = drag; drag = null; commit(); controls.enabled = mode !== 'passeio';
       if (d.kind === 'rot' || d.moved) opts.onSoltar?.(d.kind, store.projeto.itens.find((i) => i.uid === d.uid));
@@ -1205,7 +1305,7 @@ export function createView3D(container, opts = {}) {
       } else if (mira.uid && !ev.repeat) {
         if (ev.code === 'KeyE') { opts.onMiraAcao?.('pegar', mira.uid); ev.preventDefault(); return; }
         if (ev.code === 'KeyF') { opts.onMiraAcao?.('abrir', mira.uid); ev.preventDefault(); return; }
-      } else if (mira.info && !ev.repeat && ev.code === 'KeyE') { opts.onMiraAcao?.('editar', null, mira.info); ev.preventDefault(); return; }
+      } else if (mira.info && !ev.repeat && ev.code === 'KeyE') { opts.onMiraAcao?.(mira.info.kind === 'fixo' ? 'pegar' : 'editar', null, mira.info); ev.preventDefault(); return; }
     }
     if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft'].includes(ev.code)) {
       ev.preventDefault();
@@ -1253,15 +1353,15 @@ export function createView3D(container, opts = {}) {
 
   // ------------------------------------------------------------ carregar móvel em primeira pessoa (modo passeio)
   const rayM = new THREE.Raycaster();
-  const carry = { ativo: false, it: null, existente: false, ghost: null, mats: [], elevManual: null, rotManual: 0, valido: true, ultimo: '' };
+  const carry = { ativo: false, fixo: null, it: null, existente: false, ghost: null, mats: [], elevManual: null, rotManual: 0, valido: true, ultimo: '' };
   let mira = { uid: null, key: '', info: null, t: 0 };
   function limparGhost() {
     if (carry.ghost) { scene.remove(carry.ghost); carry.ghost = null; }
     carry.mats = [];
   }
   function criarGhost(it) {
-    const g = buildFurniture(it, catalogoPorId[it.tipo]);
-    aplicarEstado(g, { portas: 0, cad: 0, pes: 0 });
+    const g = carry.fixo ? buildFixture(it, plan.tip.peDireito, opcoesDe(store.projeto.fix, it)) : buildFurniture(it, catalogoPorId[it.tipo]);
+    if (g.userData.partes || !carry.fixo) aplicarEstado(g, { portas: 0, cad: 0, pes: 0 });
     g.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = false;
@@ -1276,7 +1376,7 @@ export function createView3D(container, opts = {}) {
   }
   function infoCarry() {
     const it = carry.it;
-    return carry.ativo ? { nome: it.nome, elevCm: Math.round((it.elev || 0) * 100), valido: carry.valido, existente: carry.existente, teto: !!catalogoPorId[it.tipo]?.teto } : null;
+    return carry.ativo ? { nome: it.nome, elevCm: Math.round((it.elev || 0) * 100), valido: carry.valido, existente: carry.existente, teto: !!catalogoPorId[it.tipo]?.teto, fixo: carry.fixo } : null;
   }
   function carregar(it, existente = false) {
     if (mode !== 'passeio' || !plan) return false;
@@ -1290,9 +1390,30 @@ export function createView3D(container, opts = {}) {
     opts.onCarry?.(infoCarry());
     return true;
   }
+  // pegar uma peça da construtora (pia, tanque, louças, box) e levá-la na mira, como um móvel
+  function carregarFixo(id) {
+    if (mode !== 'passeio' || !plan) return false;
+    const f = plan.fixos.find((x) => x.id === id); if (!f) return false;
+    cancelarCarry(true);
+    carry.fixo = id; carry.existente = true; carry.elevManual = null; carry.ativo = true;
+    carry.it = { ...f, uid: '__fixo_' + id, tipo: f.tipo, elev: 0, oculto: false };
+    f.oculto = true; // a própria peça não conta como obstáculo enquanto é carregada
+    const g = fixosG.find((q) => q.userData.fixo === id); if (g) g.visible = false;
+    carry.ghost = criarGhost(carry.it);
+    carry.ultimo = '';
+    atualizarCarry(true);
+    opts.onCarry?.(infoCarry());
+    return true;
+  }
+  function soltarFixo() {
+    const id = carry.fixo; carry.fixo = null;
+    const f = plan.fixos.find((x) => x.id === id); if (f) f.oculto = !!store.projeto.fix?.[id]?.oculto;
+    const g = fixosG.find((q) => q.userData.fixo === id); if (g) g.visible = !f?.oculto && mode !== 'forro';
+  }
   function cancelarCarry(silencioso = false) {
     if (!carry.ativo) return;
-    if (carry.existente) { const g = meshPorUid.get(carry.it.uid); if (g) g.visible = true; }
+    if (carry.fixo) soltarFixo();
+    else if (carry.existente) { const g = meshPorUid.get(carry.it.uid); if (g) g.visible = true; }
     carry.ativo = false; limparGhost(); carry.it = null;
     if (!silencioso) opts.onCarry?.(null);
     dirty = true;
@@ -1300,12 +1421,13 @@ export function createView3D(container, opts = {}) {
   function confirmarCarry() {
     if (!carry.ativo) return false;
     if (carry.vazio) { opts.onCarryVazio?.(); return false; }
-    const it = carry.it, existente = carry.existente;
+    const it = carry.it, existente = carry.existente, fixo = carry.fixo;
     carry.ativo = false; limparGhost();
-    if (existente) { const g = meshPorUid.get(it.uid); if (g) g.visible = true; }
+    if (fixo) soltarFixo();
+    else if (existente) { const g = meshPorUid.get(it.uid); if (g) g.visible = true; }
     carry.it = null;
     opts.onCarry?.(null);
-    opts.onCarryFim?.({ it, existente });
+    opts.onCarryFim?.({ it, existente, fixo });
     dirty = true;
     return true;
   }
@@ -1350,7 +1472,7 @@ export function createView3D(container, opts = {}) {
       if (carry.elevManual != null) elev = carry.elevManual;
       else if (tipo === 'piso') elev = c?.parede ? (c?.elev || 0) : 0;
     } else if (carry.elevManual != null) elev = (tipo === 'sobre' ? elev : 0) + carry.elevManual;
-    it.elev = Math.max(0, Math.min(2.6, elev));
+    it.elev = carry.fixo ? 0 : Math.max(0, Math.min(2.6, elev));
     if (c?.teto) aplicarTetoItem(it);
     const ok = tipo !== 'vazio' && !colide(plan, it, outros);
     const sig = [it.x.toFixed(3), it.y.toFixed(3), it.elev.toFixed(3), it.rot.toFixed(1), ok, tipo].join('|');
@@ -1362,7 +1484,7 @@ export function createView3D(container, opts = {}) {
   }
   function girarCarry(graus) { if (!carry.ativo) return; carry.it.rot = (((carry.it.rot || 0) + graus) % 360 + 360) % 360; carry.ultimo = ''; atualizarCarry(true); }
   function alturaCarry(dcm) {
-    if (!carry.ativo) return;
+    if (!carry.ativo || carry.fixo) return;
     const c = catalogoPorId[carry.it.tipo]; if (c?.teto) return;
     carry.elevManual = Math.max(0, Math.min(2.4, Math.round(((carry.elevManual ?? carry.it.elev ?? 0) * 100 + dcm)) / 100));
     carry.ultimo = ''; atualizarCarry(true);
@@ -1462,7 +1584,7 @@ export function createView3D(container, opts = {}) {
       autoFit = false; animarCamera(alvo.clone().add(off), alvo);
     },
     syncEstados, estadosDoItem,
-    carregar, cancelarCarry, confirmarCarry, girarCarry, alturaCarry, carryAtivo: () => carry.ativo, miraUid: () => mira.uid, miraInfo: () => mira.info,
+    carregar, carregarFixo, posicionarFixos, cancelarCarry, confirmarCarry, girarCarry, alturaCarry, carryAtivo: () => carry.ativo, miraUid: () => mira.uid, miraInfo: () => mira.info,
     refreshLuz() { if (!plan) return; aplicarEmissivos(); atualizarPool(); atualizarPontos(); },
     setMode(m) { if (m === mode) return; if (m !== 'passeio') cancelarCarry(); mode = m; walk.keys.clear(); aplicarModo(); opts.onMode?.(m); },
     getMode: () => mode,
@@ -1470,6 +1592,7 @@ export function createView3D(container, opts = {}) {
     getPeriodo: () => periodo,
     setParedes(m) { paredesModo = m; if (mode === 'orbita') { corte.constant = m === 'baixas' ? 1.15 : 99; } atualizarRecorte(0, true); requestRender(); },
     setFerramenta(f) { ferramenta = f; mostrarHover(null); opts.onHover?.(null); syncSel(); if (f !== 'moveis' && f !== 'luz') el.style.cursor = ''; },
+    realcarCartao, soltarCursor, prenderCursor, acaoNaMira, cursorPreso,
     setEscopo(e) { escopo = e; hoverKey = ''; if (hoverInfo) mostrarHover(hoverInfo); },
     pulsar,
     irPara(roomId) { if (mode !== 'passeio') { mode = 'passeio'; aplicarModo(); opts.onMode?.(mode); } irPara(roomId); },
@@ -1490,7 +1613,7 @@ export function createView3D(container, opts = {}) {
     // compila os shaders em paralelo (quando o navegador permite) antes do primeiro quadro
     compilar: async () => { try { await renderer.compileAsync(scene, camera); } catch { /* o primeiro render compila */ } },
     diag: () => ({ programas: renderer.info.programs?.length ?? 0, geometrias: renderer.info.memory.geometries, texturas: renderer.info.memory.textures, chamadas: renderer.info.render.calls, tri: renderer.info.render.triangles }),
-    setVisible(v) { visivel = v; if (!v) cancelarCarry(); if (v) { resize(); dirty = true; atualizarRecorte(0, true); } else walk.keys.clear(); },
+    setVisible(v) { visivel = v; if (!v) { cancelarCarry(); if (document.pointerLockElement === renderer.domElement) document.exitPointerLock(); } if (v) { resize(); dirty = true; atualizarRecorte(0, true); } else walk.keys.clear(); },
     render: requestRender,
     pontoNaTela(cx, cy) {
       const p = pontoPiso({ clientX: cx, clientY: cy }, 0);

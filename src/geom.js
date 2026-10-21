@@ -239,3 +239,19 @@ export function bordasComodo(plan, r) {
   cache.set(r.id, out);
   return out;
 }
+
+// Posição efetiva das peças da construtora: a original da planta ou a que o morador escolheu (projeto.fix[id].pos).
+// Altera plan.fixos no lugar, guardando a original em f.orig.
+export function aplicarFixos(plan, fix) {
+  if (!plan) return;
+  for (const f of plan.fixos) {
+    if (!f.orig) f.orig = { x: f.x, y: f.y, rot: f.rot || 0 };
+    const o = fix?.[f.id] || {};
+    const p = o.pos || f.orig;
+    f.x = p.x; f.y = p.y; f.rot = p.rot ?? f.orig.rot;
+    f.poly = rectCorners(f);
+    f.oculto = !!o.oculto; f.movido = !!o.pos;
+  }
+  // portas retiradas e janelas ocultas: o vão continua, sem folha nem caixilho
+  for (const o of plan.openings) o.sem = !!fix?.[o.id]?.sem;
+}

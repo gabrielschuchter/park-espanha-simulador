@@ -3,9 +3,9 @@ import { setFixo, setAberturas } from './store.js';
 import { tipologiaPorId, TIPOS_ABERTURA } from './data/tipologias.js';
 import { CATEGORIAS, CORES, catalogoPorId } from './data/catalogo.js';
 import { ACAB_VAZIO, luzDe } from './data/acabamentos.js';
-import { preparePlan, pointInPoly, localToPlan, polyArea } from './geom.js';
+import { preparePlan, pointInPoly, localToPlan, polyArea, aplicarFixos } from './geom.js';
 import {
-  store, subscribe, edit, live, commit, undo, redo, select, selected, novoItem, uid,
+  store, subscribe, notificar, edit, live, commit, undo, redo, select, selected, novoItem, uid,
   abrirProjeto, criarProjeto, renomear, exportarJSON, importarJSON, itensSugeridos, salvarAgora, marcarNovo, uso, setUso, usoEfetivo, temAjuste, estadoDe, alternarUsoItem, seguirGeral, seguirGeralTodos, contarAjustes,
 } from './store.js';
 import { analisar, circulacao, distancias, portaFrase } from './analysis.js';
@@ -19,14 +19,14 @@ import { $, $$, esc, cm, fmtM2, mobile, toque, toast, abrirDialogo, confirmar, b
 import { renderHome, iniciarHome } from './ui/home.js';
 import { renderCatalogo, iniciarCatalogo } from './ui/catalogo-ui.js';
 import {
-  iniciarFerramentas, redesenharFerramentas, desenharLuz, aplicar, alternarLuzComodo, trocarFerramenta, ajustarItensTeto, escopoAtual,
-} from './ui/ferramentas.js';
+  iniciarFerramentas, redesenharFerramentas, desenharLuz, aplicar, alternarLuzComodo, trocarFerramenta, ajustarItensTeto, escopoAtual, montarCartaoSuperficie } from './ui/ferramentas.js';
 import { exportarPlantaPng, exportarPlantaSvg, exportarCsv, exportarFoto, itensPorComodo } from './ui/exportar.js';
 import { abrirTour, tourVisto } from './ui/tour.js';
-import { iniciarPecas, renderPecas, selecionarPeca } from './ui/pecas.js';
+import { iniciarPecas, renderPecas, selecionarPeca, montarCartaoPeca, montarCartaoAbertura } from './ui/pecas.js';
 import { DICAS } from './data/dicas.js';
 
 let plan = null, plan2d = null, view3d = null, view3dLoading = null;
+let cartaoAtual = null;
 let viewMode = '2d', tool = 'moveis', ferrAberto = true, inspMobile = false, forroAuto = false, periodo = 'dia', paredesModo = 'recorte';
 let ultimaAnalise = { alertas: [], circ: null };
 
@@ -38,7 +38,8 @@ Som.montarControle($('#som-editor'));
 function atualizarLayout() {
   const ws = $('#workspace');
   const comItem = !!selected() && (tool === 'moveis' || tool === 'luz');
-  const insp = comItem && (!mobile() || inspMobile);
+  const insp = !!cartaoAtual || (comItem && (!mobile() || inspMobile));
+  ws.dataset.cartao = cartaoAtual ? '1' : '0';
   ws.dataset.insp = insp ? '1' : '0';
   ws.dataset.ferr = ferrAberto && !(mobile() && insp) ? '1' : '0';
   ws.dataset.tool = tool;
@@ -48,6 +49,7 @@ function atualizarLayout() {
 window.matchMedia('(max-width: 860px)').addEventListener('change', atualizarLayout);
 
 function setTool(t) {
+  if (cartaoAtual) fecharCartao(true);
   if (t === tool) { ferrAberto = !ferrAberto; tocar(ferrAberto ? 'abrir' : 'fechar'); atualizarLayout(); return; }
   tool = t; ferrAberto = true; inspMobile = false;
   if (t !== 'moveis' && t !== 'luz') select(null);
@@ -71,6 +73,9 @@ document.addEventListener('click', (ev) => {
   if (b.dataset.fechar === 'inspetor') { inspMobile = false; select(null); atualizarLayout(); }
 });
 
+let assinFixos = '';
+const assinaturaFixos = () => (plan?.fixos || []).map((f) => `${f.id}:${f.x.toFixed(3)},${f.y.toFixed(3)},${f.rot}`).join('|');
+
 // ======================================================================== abrir o editor
 async function abrirEditor(novo = false) {
   const car = carregando('Abrindo o apartamento…');
@@ -78,16 +83,17 @@ async function abrirEditor(novo = false) {
     await frame();
     const tip = tipologiaPorId(store.projeto.tipologia);
     plan = preparePlan(tip);
-    for (const f of plan.fixos) f.oculto = !!store.projeto.fix?.[f.id]?.oculto;
+    aplicarFixos(plan, store.projeto.fix); assinFixos = assinaturaFixos();
     $('#home').hidden = true; $('#editor').hidden = false;
     $('#proj-nome').value = store.projeto.nome;
-    $('#proj-tip').textContent = `TIPOLOGIA ${tip.nome.toUpperCase()} · ${fmtM2(tip.areaPrivativa)} m² · pé-direito ${String(tip.peDireito).replace('.', ',')} m`;
+    $('#proj-tip').textContent = `TIPOLOGIA ${tip.nome.toUpperCase()} · ${tip.areaEstimada ? '≈ ' : ''}${fmtM2(tip.areaPrivativa)} m² · pé-direito ${String(tip.peDireito).replace('.', ',')} m`;
     car.prog(0.2); car.txt('Preparando a planta…'); await frame();
     if (!plan2d) {
       plan2d = createPlan2D($('#plan-host'), {
         onView: atualizarEscala, onRoomClick: (id, t) => aplicar(t === 'paredes' ? 'parede' : t, id, null, false),
         onLuzToggle: alternarLuzComodo, onSelScreen: (p) => posBarra(barra2d, p),
         onPegar: () => tocar('pegar'), onEncaixe: () => tocar('encaixe'), onSoltar: aoSoltar, aoMover: ajustarTeto,
+        onFixoMovido: fixoMovido, onFixoClick: (id) => editarAlvo({ kind: 'fixo', id }),
       });
     }
     plan2d.setPlan(plan);
@@ -124,7 +130,7 @@ async function garantir3D() {
         onSelScreen: (p) => posBarra(barra3d, p),
         onPegar: () => tocar('pegar'), onEncaixe: () => tocar('encaixe'), onSoltar: aoSoltar,
         onPasso: ({ piso }) => tocarPasso(piso),
-        onCarry: aoCarregar, onCarryFim: fimCarregar, onCarryVazio: () => { tocar('erro'); toast('Mire numa parede, no piso, no teto ou em cima de um móvel.'); }, onMira: aoMirar, onEditar: editarAlvo, onMiraAcao: acaoMira,
+        onCarry: aoCarregar, onCarryFim: fimCarregar, onCarryVazio: () => { tocar('erro'); toast('Mire numa parede, no piso, no teto ou em cima de um móvel.'); }, onMira: aoMirar, onCursor: aoCursor, onEditar: editarAlvo, onFixoMovido: fixoMovido, onMiraAcao: acaoMira,
       });
       view3d.setPlan(plan);
       view3d.syncItems(store.projeto.itens);
@@ -210,7 +216,7 @@ function aoMudarModo(m) {
   const hint = {
     orbita: toque() ? 'Arraste para girar · pinça para aproximar · toque num móvel e arraste para mover' : 'Arraste para girar · botão direito move a câmera · role para aproximar · arraste um móvel para mover',
     cima: 'Vista de cima com corte a 1,15 m',
-    passeio: toque() ? 'Joystick para andar · arraste a tela para olhar · escolha um móvel e ele aparece na mira' : 'W A S D andam · arraste para olhar · escolha um móvel no catálogo para colocá-lo onde você olha · E pega o móvel da mira',
+    passeio: toque() ? 'Joystick anda · arraste para olhar · mire em algo e use os botões que aparecem' : 'Clique na vista para olhar com o mouse (Esc solta) · W A S D andam · clique edita o que está na mira · E pega',
     forro: tool === 'teto' ? 'Vista de baixo para cima. Escolha o forro e clique no cômodo.' : 'Vista de baixo para cima: forro, sancas e luminárias',
   }[m];
   const h = $('#hint-3d'); h.textContent = hint; h.hidden = false;
@@ -222,20 +228,20 @@ function aoMudarModo(m) {
 // joystick
 (() => {
   const joy = $('#joy'), knob = $('.joy-knob', joy);
-  let id = null, c = null;
+  let id = null, c = null, raio = 50;
   // zona morta de 12% no centro (o polegar nunca fica parado), e o resto reescalado para 0..1 sem salto na borda da zona
   const ZM = 0.12;
   const set = (x, y) => {
-    knob.style.transform = `translate(${x * 38}px, ${y * 38}px)`;
+    knob.style.transform = `translate(${x * raio * 0.76}px, ${y * raio * 0.76}px)`;
     const l = Math.hypot(x, y);
     const m = l < ZM ? 0 : (l - ZM) / (1 - ZM);
     knob.classList.toggle('corre', m > 0.92);
     view3d?.moveInput(l ? (x / l) * m : 0, l ? (-y / l) * m : 0);
   };
-  joy.addEventListener('pointerdown', (ev) => { id = ev.pointerId; joy.setPointerCapture(id); const r = joy.getBoundingClientRect(); c = [r.left + r.width / 2, r.top + r.height / 2]; ev.preventDefault(); ev.stopPropagation(); });
+  joy.addEventListener('pointerdown', (ev) => { id = ev.pointerId; joy.setPointerCapture(id); const r = joy.getBoundingClientRect(); c = [r.left + r.width / 2, r.top + r.height / 2]; raio = r.width * 0.39; ev.preventDefault(); ev.stopPropagation(); });
   joy.addEventListener('pointermove', (ev) => {
     if (ev.pointerId !== id) return;
-    let x = (ev.clientX - c[0]) / 50, y = (ev.clientY - c[1]) / 50; const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
+    let x = (ev.clientX - c[0]) / raio, y = (ev.clientY - c[1]) / raio; const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
     set(x, y);
   });
   const end = () => { id = null; set(0, 0); };
@@ -370,12 +376,18 @@ function aoCarregar(info) {
   if (!info) { box.hidden = true; return; }
   if (box.hidden) { box.hidden = false; $('#mira-tip').hidden = true; $('#acoes-passeio').hidden = true; }
   $('#carry-nome').textContent = info.existente ? `Movendo: ${info.nome}` : info.nome;
-  $('#cy-alt').textContent = info.teto ? 'no forro' : `${info.elevCm} cm`;
-  $('#cy-baixo').disabled = $('#cy-cima').disabled = info.teto;
+  $('#cy-alt').textContent = info.teto ? 'no forro' : info.fixo ? 'no piso' : `${info.elevCm} cm`;
+  $('#cy-baixo').disabled = $('#cy-cima').disabled = info.teto || !!info.fixo;
   $('#cy-ok').textContent = info.valido ? 'Colocar aqui' : 'Colocar mesmo assim';
   $('#cy-ok').classList.toggle('aviso', !info.valido);
 }
-function fimCarregar({ it, existente }) {
+function fixoMovido() { tocar('soltar'); notificar('fixos'); }
+function fimCarregar({ it, existente, fixo }) {
+  if (fixo) {
+    edit((p) => { p.fix[fixo] = { ...(p.fix[fixo] || {}), pos: { x: Math.round(it.x * 100) / 100, y: Math.round(it.y * 100) / 100, rot: it.rot || 0 } }; }, 'fixos');
+    tocar('soltar'); toast(`${it.nome} movido. Para desfazer, use “Voltar ao lugar original” na edição da peça.`);
+    return;
+  }
   const colidiu = colide(plan, it, store.projeto.itens.filter((i) => i.uid !== it.uid));
   if (existente) {
     const real = store.projeto.itens.find((i) => i.uid === it.uid); if (!real) return;
@@ -395,26 +407,50 @@ $('#cy-cima').addEventListener('click', () => view3d?.alturaCarry(5));
 $('#cy-x').addEventListener('click', () => { tocar('fechar'); view3d?.cancelarCarry(); });
 $('#cy-ok').addEventListener('click', () => view3d?.confirmarCarry());
 
+// cursor preso no Passeio (computador): a dica muda e o cursor some
+function aoCursor(preso, falhou) {
+  const h = $('#hint-3d');
+  $('#vista-3d').classList.toggle('cursor-preso', preso);
+  if (view3d?.getMode() !== 'passeio') return;
+  h.textContent = preso ? 'Mouse olha · W A S D andam · clique edita (ou pinta) o que está na mira · E pega · Esc solta o mouse'
+    : falhou ? 'Arraste para olhar · clique edita o que você clicou · W A S D andam'
+      : 'Clique na vista para olhar com o mouse · W A S D andam';
+  h.hidden = false; clearTimeout(window.__hint); window.__hint = setTimeout(() => { h.hidden = true; }, preso ? 5000 : 7000);
+}
 function aoMirar(info) {
   const tip = $('#mira-tip'), ac = $('#acoes-passeio');
   $('#mira').classList.toggle('alvo', !!info);
   if (!info) { tip.hidden = true; ac.hidden = true; return; }
-  const bt = (k, t) => `<button class="btn btn-sm" data-ma="${k}">${t}</button>`;
+  const bt = (k, t, pri) => `<button class="btn btn-sm${pri ? ' pri' : ''}" data-ma="${k}">${t}</button>`;
+  const teclado = !toque();
   tip.hidden = false;
-  if (info.kind !== 'item') {
-    const rot = { fixo: 'Editar peça', abertura: 'Editar portas e janelas', superficie: { parede: 'Pintar ou revestir', piso: 'Trocar piso', teto: 'Trocar forro' }[info.tipo] }[info.kind];
-    tip.textContent = toque() ? info.nome : `${info.nome} · E ${rot.toLowerCase()}`;
-    ac.innerHTML = bt('editar', rot) + (info.kind === 'fixo' ? '<small class="nota-mira">posição fixa (ponto hidráulico)</small>' : '');
-    ac.hidden = false; return;
+  if (info.kind === 'interruptor') {
+    const r = plan.rooms.find((q) => q.id === info.room), on = r && luzDe(store.projeto.acab, r).on;
+    tip.textContent = teclado ? `${info.nome} · clique ${on ? 'apaga' : 'acende'}` : info.nome;
+    ac.innerHTML = bt('luz', on ? 'Apagar a luz' : 'Acender a luz', true); ac.hidden = false; return;
+  }
+  if (info.kind === 'superficie') {
+    const pincel = { paredes: 'parede', piso: 'piso', teto: 'teto' }[tool] === info.tipo;
+    const rot = { parede: 'Pintar ou revestir', piso: 'Trocar piso', teto: 'Trocar forro' }[info.tipo];
+    tip.textContent = teclado ? `${info.nome} · clique ${pincel ? 'aplica o acabamento escolhido' : rot.toLowerCase()}` : info.nome;
+    ac.innerHTML = (pincel ? bt('aplicar', 'Aplicar aqui', true) : '') + bt('editar', rot, !pincel); ac.hidden = false; return;
+  }
+  if (info.kind === 'fixo') {
+    tip.textContent = teclado ? `${info.nome} · clique edita · E move` : info.nome;
+    ac.innerHTML = bt('pegar', 'Mover') + bt('editar', 'Editar', true); ac.hidden = false; return;
+  }
+  if (info.kind === 'abertura') {
+    tip.textContent = teclado ? `${info.nome} · clique edita` : info.nome;
+    ac.innerHTML = bt('editar', 'Editar', true); ac.hidden = false; return;
   }
   const e = info.estados || {};
-  tip.textContent = toque() ? info.nome : `${info.nome} · E pegar${e.portas ? ' · F abrir/fechar' : ''}`;
+  tip.textContent = teclado ? `${info.nome} · clique edita · E pega${e.portas ? ' · F abre' : ''}` : info.nome;
   const it = store.projeto.itens.find((i) => i.uid === info.uid) || {};
-  ac.innerHTML = bt('pegar', 'Pegar e mover')
+  ac.innerHTML = bt('pegar', 'Mover')
     + (e.portas ? bt('abrir', usoEfetivo(it, 'aberto') ? 'Fechar portas' : 'Abrir portas') : '')
     + (e.cad ? bt('cad', usoEfetivo(it, 'cadeiras') ? 'Empurrar cadeiras' : 'Puxar cadeiras') : '')
     + (e.pes ? bt('pes', usoEfetivo(it, 'pessoas') ? 'Tirar pessoas' : 'Sentar pessoas') : '')
-    + bt('editar', 'Editar');
+    + bt('editar', 'Editar', true);
   ac.hidden = false;
 }
 // abre a ferramenta sem alternar (setTool fecha o painel se a ferramenta já estiver ativa)
@@ -422,25 +458,72 @@ function abrirTool(t) {
   if (tool === t) { ferrAberto = true; inspMobile = false; if (t === 'fixos') renderPecas(); atualizarLayout(); tocar('abrir'); }
   else setTool(t);
 }
-// editar o que foi clicado ou mirado no 3D: móvel, peça da construtora, abertura ou superfície
+// editar o que foi clicado ou mirado no 3D: móvel (inspetor), peça da construtora, abertura ou superfície (cartão)
 function editarAlvo(a) {
   if (!a) return;
-  if (a.kind === 'item') { if (tool !== 'moveis' && tool !== 'luz') setTool('moveis'); select(a.uid); if (mobile()) { inspMobile = true; atualizarLayout(); } tocar('abrir'); return; }
-  if (a.kind === 'fixo' || a.kind === 'abertura') { selecionarPeca(a.kind === 'fixo' ? a.id : '_ab'); abrirTool('fixos'); return; }
-  if (a.kind === 'superficie') {
-    const t = a.tipo === 'parede' ? 'paredes' : a.tipo;
-    abrirTool(t);
-    toast(`Escolha ${a.tipo === 'parede' ? 'a cor ou o revestimento' : a.tipo === 'piso' ? 'o piso' : 'o forro'} no painel e clique na superfície.`);
+  view3d?.soltarCursor?.();
+  if (a.kind === 'item') { fecharCartao(true); if (tool !== 'moveis' && tool !== 'luz') setTool('moveis'); select(a.uid); if (mobile()) { inspMobile = true; atualizarLayout(); } tocar('abrir'); return; }
+  abrirCartao(a.kind === 'superficie' ? { kind: 'superficie', tipo: a.tipo, room: a.room, edge: a.edge } : { kind: a.kind, id: a.id });
+}
+// ======================================================================== cartão de edição (uma coisa só, com X para sair)
+function abrirCartao(a) {
+  select(null);
+  cartaoAtual = a;
+  if (tool !== 'moveis' && tool !== 'luz') { tool = 'moveis'; trocarFerramenta('moveis'); plan2d?.setFerramenta('moveis'); sincronizar3D(); }
+  ferrAberto = false;
+  renderCartao(); atualizarLayout(); tocar('abrir');
+}
+function fecharCartao(silencioso = false) {
+  if (!cartaoAtual) return;
+  cartaoAtual = null; view3d?.realcarCartao?.(null);
+  renderCartao(); atualizarLayout();
+  if (!silencioso) tocar('fechar');
+}
+function nomeComodo(x, y) { return plan?.rooms.find((r) => pointInPoly(x, y, r.poly))?.nome || ''; }
+function renderCartao() {
+  const box = $('#insp-cartao'), corpo = $('#cartao-corpo');
+  $('#insp-item').hidden = !!cartaoAtual;
+  if (!cartaoAtual) { box.hidden = true; corpo.innerHTML = ''; corpo.onclick = null; return; }
+  box.hidden = false;
+  const a = cartaoAtual;
+  let tit = '', sub = '';
+  if (a.kind === 'fixo') {
+    const f = plan.fixos.find((x) => x.id === a.id); if (!f) { fecharCartao(true); return; }
+    tit = f.nome; sub = [nomeComodo(f.x, f.y), f.movido ? 'fora da posição original' : '', f.oculto ? 'oculta' : ''].filter(Boolean).join(' · ');
+    corpo.onclick = null; montarCartaoPeca(corpo, a.id);
+  } else if (a.kind === 'abertura') {
+    const o = plan.openings.find((x) => x.id === a.id); if (!o) { fecharCartao(true); return; }
+    const porta = o.porta;
+    tit = `${porta ? (o.correr ? 'Porta de correr' : o.entrada ? 'Porta de entrada' : 'Porta') : 'Janela'}${o.rotulo ? ' · ' + o.rotulo : ''}`;
+    sub = o.sem ? (porta ? 'retirada, só o vão' : 'oculta, só o vão') : `${Math.round(o.largura * 100)} cm de largura`;
+    corpo.onclick = null; montarCartaoAbertura(corpo, a.id);
+  } else {
+    const r = plan.rooms.find((q) => q.id === a.room); if (!r) { fecharCartao(true); return; }
+    tit = `${{ parede: 'Parede', piso: 'Piso', teto: 'Teto' }[a.tipo]} · ${r.nome}`;
+    sub = a.tipo === 'parede' ? 'Escolha o que mudar e a cor ou o revestimento: vale na hora' : 'Escolha o alcance e o acabamento: vale na hora';
+    montarCartaoSuperficie(corpo, a, { onRealce: (al, esc_) => view3d?.realcarCartao?.(al, esc_) });
   }
+  $('#cartao-tit').textContent = tit; $('#cartao-sub').textContent = sub;
+}
+$('#cartao-x').addEventListener('click', () => fecharCartao());
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && cartaoAtual && !view3d?.carryAtivo?.() && !ev.target.closest?.('input,textarea,select')) fecharCartao(); });
+function moverFixo(id) {
+  const v3 = view3d;
+  if (viewMode !== '2d' && v3?.getMode() === 'passeio') { if (mobile()) fecharCartao(true); v3.carregarFixo(id); tocar('pegar'); return; }
+  toast(viewMode === '2d' ? 'Arraste a peça na planta.' : 'Arraste a peça no 3D. No Passeio, “Mover” leva a peça na mira.');
 }
 function acaoMira(acao, uid, info) {
-  if (acao === 'editar') { editarAlvo(info || view3d?.miraInfo() || (uid ? { kind: 'item', uid } : null)); return; }
-  const it = store.projeto.itens.find((i) => i.uid === uid); if (!it || !view3d) return;
+  info = info || view3d?.miraInfo();
+  if (acao === 'editar') { editarAlvo(info || (uid ? { kind: 'item', uid } : null)); return; }
+  if (acao === 'luz' && info?.room) { alternarLuzComodo(info.room); aoMirar(view3d?.miraInfo()); return; }
+  if (acao === 'aplicar' && info?.kind === 'superficie') { aplicar(info.tipo, info.room, info.edge, true); return; }
+  if (acao === 'pegar' && info?.kind === 'fixo') { fecharCartao(true); view3d?.carregarFixo(info.id); tocar('pegar'); return; }
+  const it = store.projeto.itens.find((i) => i.uid === (uid || info?.uid)); if (!it || !view3d) return;
   if (acao === 'pegar') { view3d.carregar(it, true); tocar('pegar'); return; }
   const k = { abrir: 'aberto', cad: 'cadeiras', pes: 'pessoas' }[acao];
-  if (k) { const v = alternarUsoItem(it, k); tocar(v ? 'abrir' : 'fechar'); aoMirar({ kind: 'item', uid, nome: it.nome, estados: view3d.estadosDoItem(uid) }); }
+  if (k) { const v = alternarUsoItem(it, k); tocar(v ? 'abrir' : 'fechar'); aoMirar({ kind: 'item', uid: it.uid, nome: it.nome, estados: view3d.estadosDoItem(it.uid) }); }
 }
-$('#acoes-passeio').addEventListener('click', (ev) => { const b = ev.target.closest('[data-ma]'); if (b && view3d) acaoMira(b.dataset.ma, view3d.miraUid()); });
+$('#acoes-passeio').addEventListener('click', (ev) => { const b = ev.target.closest('[data-ma]'); if (b && view3d) acaoMira(b.dataset.ma, view3d.miraUid(), view3d.miraInfo()); });
 
 // ======================================================================== inspetor do móvel
 const LADOS = { '0,1': 'Frente', '0,-1': 'Fundo', '-1,0': 'Esquerda', '1,0': 'Direita' };
@@ -722,6 +805,7 @@ $('#dicas-corpo').addEventListener('click', async (ev) => {
 // ======================================================================== peças fixas (pia, tanque, louças, box, portas e janelas)
 iniciarPecas({
   plan: () => plan,
+  mover: moverFixo,
   focar: async (id) => {
     const f = plan.fixos.find((x) => x.id === id); if (!f) return;
     if (viewMode === '2d') await setView('3d');
@@ -756,8 +840,13 @@ subscribe((kind) => {
     if (tool === 'luz') desenharLuz();
     agendarAnalise();
   }
+  if (kind === 'fixpos') { aplicarFixos(plan, store.projeto.fix); plan2d.redrawFixos(); view3d?.posicionarFixos(); return; }
   if (kind === 'fixos') {
+    aplicarFixos(plan, store.projeto.fix);
     view3d?.refreshFixos(); plan2d.redrawFixos(); plan2d.redrawItems();
+    // o azulejo atrás da pia e do box acompanha a peça: só refaz as paredes quando alguma posição mudou
+    const a = assinaturaFixos(); if (a !== assinFixos) { assinFixos = a; view3d?.refreshAcab(); }
+    if (cartaoAtual) renderCartao();
     if (tool === 'fixos') renderPecas();
     agendarAnalise();
   }
@@ -768,9 +857,11 @@ subscribe((kind) => {
     view3d?.syncItems(store.projeto.itens);
     plan2d.redrawItems();
     desenharLuz();
+    if (cartaoAtual?.kind === 'superficie') renderCartao();
   }
   if (kind === 'luz') { view3d?.refreshLuz(); desenharLuz(); }
   if (kind === 'sel') {
+    if (store.sel && cartaoAtual) fecharCartao(true);
     plan2d.redrawItems();
     view3d?.syncSel();
     renderInspetor();
@@ -867,7 +958,8 @@ function acao(a) {
       <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> refaz, <kbd>Ctrl</kbd>+<kbd>D</kbd> duplica, <kbd>Delete</kbd> exclui, <kbd>Esc</kbd> cancela a seleção.</li>
       <li><b>Paredes, Piso e Teto:</b> escolha uma amostra e clique na superfície. “Uma parede” pinta só a parede clicada, “Cômodo” pinta o ambiente e “Todos” aplica a todos, menos aos banheiros.</li>
       <li><b>Luz:</b> clique no interruptor na parede (3D) ou no botão de lâmpada na planta. A luz de verdade aparece em “Noite”.</li>
-      <li><b>Passeio 3D:</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou setas para andar, arraste para olhar, <kbd>Shift</kbd> para andar mais rápido, roda do mouse para aproximar a imagem. No celular, use o joystick (empurre até a borda para correr), arraste para olhar e use a pinça para aproximar.</li>
+      <li><b>Passeio 3D:</b> no computador, clique na vista para prender o cursor: o mouse olha, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> andam, <kbd>Shift</kbd> corre, o clique edita (ou pinta, com uma ferramenta aberta) o que está na mira, <kbd>E</kbd> pega móvel ou peça, <kbd>F</kbd> abre portas e <kbd>Esc</kbd> solta o cursor. No celular, joystick anda (na borda corre), arrastar olha, pinça aproxima, e as ações ficam nos botões que aparecem ao mirar.</li>
+      <li><b>Editar uma coisa só:</b> clique numa peça da construtora, porta, janela, parede, piso ou teto para abrir o cartão de edição dela. Peças podem ser arrastadas no 3D e na planta, giradas, ocultadas e voltar ao lugar original. Portas podem ser retiradas e recolocadas.</li>
       <li><b>Maquete 3D:</b> arraste para girar, roda do mouse ou pinça para aproximar até o ponto sob o cursor ou entre os dedos, botão direito ou dois dedos para deslocar. Duplo clique ou duplo toque aproxima do ponto; outro duplo clique volta ao enquadramento geral.</li>
       <li><b>Colocar móvel olhando:</b> no Passeio, escolha um móvel no catálogo. Ele aparece na mira, verde se cabe e vermelho se sobrepõe. Olhe para o chão, uma parede, o teto ou o tampo de outro móvel. <kbd>Q</kbd>/<kbd>E</kbd> giram, <kbd>R</kbd>/<kbd>F</kbd> sobem e descem 5 cm, clique ou <kbd>Enter</kbd> coloca, <kbd>Esc</kbd> cancela. Com a mira num móvel, <kbd>E</kbd> pega para mover e <kbd>F</kbd> abre ou fecha.</li>
       <li><b>Zoom no 3D:</b> botões + e − no canto da tela, e o botão do meio centraliza. A roda do mouse e a pinça também funcionam.</li>

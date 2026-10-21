@@ -62,6 +62,27 @@ export function opcoesDe(fix, f) {
   const sch = FIX_SCHEMA[f.tipo] || [];
   const o = {};
   for (const s of sch) o[s.k] = s.padrao;
-  return { ...o, ...(fix?.[f.id] || {}) };
+  return { ...o, ...(f.padrao || {}), ...(fix?.[f.id] || {}) };
 }
 export const abDe = (fix) => ({ ...AB_PADRAO, ...(fix?._ab || {}) });
+// Opções de uma abertura: o padrão geral (_ab) com o que foi mudado só nela (fix[o.id]).
+// sem: porta retirada (fica o vão) ou janela oculta; folha: cor da folha desta porta.
+export function abDeAbertura(fix, o) {
+  const g = abDe(fix), p = fix?.[o.id] || {};
+  return { ...g, folha: p.folha || (o.entrada ? g.entrada : g.porta), ...p };
+}
+export const ABERTURA_SCHEMA = {
+  porta: [
+    { k: 'folha', nome: 'Cor da porta', t: 'cor', op: [['#f6f4f0', 'Branco'], ['#e9e1d3', 'Off-white'], ['#c9a77c', 'Carvalho'], ['#6e4a31', 'Nogueira'], ['#2f2e2c', 'Preto'], ['#3f5f6b', 'Petróleo'], ['#7d8461', 'Oliva']] },
+    { k: 'macaneta', nome: 'Maçaneta', t: 'cor', op: METAIS },
+  ],
+  correr: [
+    { k: 'esquadria', nome: 'Caixilho', t: 'cor', op: [['#f2f2f0', 'Branco'], ['#2b2b2d', 'Preto'], ['#6b4f3a', 'Bronze'], ['#b9bcc0', 'Alumínio natural']] },
+    { k: 'vidro', nome: 'Vidro', t: 'chips', op: [['incolor', 'Incolor'], ['fume', 'Fumê'], ['verde', 'Verde'], ['jateado', 'Jateado']] },
+  ],
+  janela: [
+    { k: 'esquadria', nome: 'Caixilho', t: 'cor', op: [['#f2f2f0', 'Branco'], ['#2b2b2d', 'Preto'], ['#6b4f3a', 'Bronze'], ['#b9bcc0', 'Alumínio natural']] },
+    { k: 'vidro', nome: 'Vidro', t: 'chips', op: [['incolor', 'Incolor'], ['fume', 'Fumê'], ['verde', 'Verde'], ['jateado', 'Jateado']] },
+  ],
+};
+export const tipoAbertura = (o) => (o.porta ? (o.correr ? 'correr' : 'porta') : 'janela');

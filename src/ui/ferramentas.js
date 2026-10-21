@@ -149,13 +149,13 @@ export function ajustarItensTeto(proj) {
   }
 }
 
-export function aplicar(tipo, roomId, edge, origem3d = false) {
+export function aplicar(tipo, roomId, edge, origem3d = false, sobre = null) {
   const plan = A.plan();
   const room = plan.rooms.find((r) => r.id === roomId); if (!room) return;
-  const esc_ = F.esc[{ parede: 'paredes' }[tipo] || tipo];
+  const esc_ = sobre?.escopo || F.esc[{ parede: 'paredes' }[tipo] || tipo];
   const lista = alvos(roomId, esc_);
   let frase = '';
-  const b = F.brush[{ parede: 'paredes' }[tipo] || tipo];
+  const b = sobre?.brush || F.brush[{ parede: 'paredes' }[tipo] || tipo];
   edit((p) => {
     const a = p.acab;
     if (tipo === 'piso') {
@@ -253,3 +253,72 @@ export const ferramentaAtual = () => F.tool;
 export function trocarFerramenta(t) { F.tool = t; A.v3()?.setEscopo(F.esc[t] || 'comodo'); if (t === 'paredes') desenharParedes(); setTimeout(preencherThumbs, 30); }
 export { desenharParedes };
 void esc; void fmtM2; void paredeDe; void rodapeDe; void tetoDe; void tempPorId; void pisoDe;
+
+// ------------------------------------------------------------ cartão de edição de uma superfície (parede, piso, teto)
+// Tudo o que se escolhe aqui vale na hora para a superfície mirada ou clicada, no alcance escolhido.
+const CE = { parede: 'unico', piso: 'comodo', teto: 'comodo', ptab: 'tinta' };
+const ESCOPOS = {
+  parede: [['unico', 'Só esta parede'], ['comodo', 'Todas as paredes deste cômodo'], ['todos', 'Todas as paredes do apartamento (menos banheiros)']],
+  piso: [['comodo', 'Só o piso deste cômodo'], ['todos', 'O piso do apartamento inteiro (menos banheiros)']],
+  teto: [['comodo', 'Só o teto deste cômodo'], ['todos', 'O teto do apartamento inteiro (menos banheiros)']],
+};
+export function montarCartaoSuperficie(host, alvo, ctx = {}) {
+  const plan = A.plan(), room = plan.rooms.find((r) => r.id === alvo.room);
+  const tipo = alvo.tipo;
+  const escHtml = () => `<div class="esc-lista" role="radiogroup" aria-label="O que vai mudar">${ESCOPOS[tipo].map(([k, t]) => `<button type="button" role="radio" aria-checked="${CE[tipo] === k}" data-ce="${k}"><i></i>${esc(t)}</button>`).join('')}</div>
+    <p class="nota">O realce azul no 3D mostra o que vai mudar.</p>`;
+  const aplicarB = (brush) => aplicar(tipo, alvo.room, alvo.edge, true, { brush, escopo: CE[tipo] });
+  const render = () => {
+    const a = store.projeto.acab;
+    let corpo = '';
+    if (tipo === 'parede') {
+      const fin = paredeDe(a, room, alvo.edge);
+      corpo = `<div class="seg seg-full" role="tablist">${[['tinta', 'Tintas'], ['rev', 'Azulejos'], ['tex', 'Texturas'], ['rodape', 'Rodapé']].map(([k, t]) => `<button role="tab" data-ct="${k}" aria-selected="${CE.ptab === k}">${t}</button>`).join('')}</div>`;
+      if (CE.ptab === 'tinta') corpo += `<div class="sw-grid">${swOrig(false, 'data-corig="1"')}</div><div class="ce-cores"></div>`;
+      else if (CE.ptab === 'rev') corpo += `<div class="sw-grid">${swOrig(false, 'data-corig="1"')}${REVESTIMENTOS.map((d) => swTex(d, fin.t === 'tex' && fin.id === d.id, `data-ctex="${d.id}"`)).join('')}</div>`;
+      else if (CE.ptab === 'tex') {
+        const gr = {}; TEXTURAS_PAREDE.forEach((d) => (gr[d.grupo] ||= []).push(d));
+        corpo += Object.entries(gr).map(([g, l]) => `<h3 class="sub">${g}</h3><div class="sw-grid">${l.map((d) => swTex(d, fin.t === 'tex' && fin.id === d.id, `data-ctex="${d.id}"`)).join('')}</div>`).join('');
+      } else {
+        const atual = rodapeDe(a, room)?.id;
+        corpo += `<div class="rod-lista">${RODAPES.map((r) => `<button class="rod${atual === r.id ? ' on' : ''}" data-crod="${r.id}"><i style="background:${r.cor};height:${Math.max(2, r.alt * 60)}px"></i><span>${esc(r.nome)}</span></button>`).join('')}</div><p class="nota">O rodapé vale para o cômodo inteiro.</p>`;
+      }
+      host.innerHTML = (CE.ptab === 'rodape' ? '' : escHtml()) + corpo;
+      if (CE.ptab === 'tinta') {
+        montarSeletorCores($('.ce-cores', host), {
+          atual: fin.t === 'tinta' ? fin.cor : null, nome: fin.nome, marca: fin.marca, codigo: fin.codigo,
+          onPick: (o) => aplicarB({ kind: 'tinta', ...o }),
+        });
+      }
+    } else if (tipo === 'piso') {
+      const atual = pisoDe(a, room)?.id, gr = {};
+      PISOS.forEach((d) => (gr[d.grupo] ||= []).push(d));
+      host.innerHTML = escHtml() + `<div class="sw-grid">${swOrig(false, 'data-corig="1"')}</div>` +
+        Object.entries(gr).map(([g, l]) => `<h3 class="sub">${g}</h3><div class="sw-grid">${l.map((d) => swTex(d, atual === d.id, `data-cpiso="${d.id}"`)).join('')}</div>`).join('');
+    } else {
+      const t = tetoDe(a, room);
+      host.innerHTML = escHtml() + `<div class="teto-cards">${TETOS.map((x) => `<button class="teto-card${t.tipo === x.id ? ' on' : ''}" data-ctt="${x.id}"><svg viewBox="0 0 64 36" aria-hidden="true">${SEC[x.id]}</svg><b>${esc(x.nome)}</b><span>${esc(x.desc)}</span></button>`).join('')}</div>
+        <h3 class="sub">Rebaixo</h3><div class="opc-chips">${REBAIXOS.map((d) => `<button class="${Math.abs((t.drop || 0) - d) < 0.001 ? 'on' : ''}" data-cdrop="${d}" ${t.tipo === 'laje' ? 'disabled' : ''}>${cm(d)} cm</button>`).join('')}</div>
+        <h3 class="sub">Cor</h3><div class="cores">${COR_TETO.map(([c, n]) => `<button class="cor${t.cor === c ? ' on' : ''}" style="background:${c}" data-ctcor="${c}" aria-label="${n}" title="${n}"></button>`).join('')}</div>`;
+    }
+    ctx.onRealce?.(alvo, CE[tipo]);
+    preencherThumbs();
+  };
+  host.onclick = (ev) => {
+    const b = ev.target.closest('button'); if (!b || !host.contains(b)) return;
+    const d = b.dataset;
+    if (d.ce) { CE[tipo] = d.ce; tocar('clique'); render(); return; }
+    if (d.ct) { CE.ptab = d.ct; tocar('clique'); render(); return; }
+    if (d.corig) { aplicarB(tipo === 'parede' ? { kind: 'original' } : tipo === 'piso' ? { id: null } : { tipo: 'original' }); return; }
+    if (d.ctex) { aplicarB({ kind: 'tex', id: d.ctex }); return; }
+    if (d.crod) { aplicarB({ kind: 'rodape', id: d.crod }); return; }
+    if (d.cpiso) { aplicarB({ id: d.cpiso }); return; }
+    const t = tetoDe(store.projeto.acab, room);
+    const base = { tipo: t.tipo === 'laje' ? 'gesso' : t.tipo, drop: t.drop || 0.1, cor: t.cor || COR_TETO[0][0] };
+    if (d.ctt) { const x = tetoPorId[d.ctt]; aplicarB({ ...base, tipo: x.id, drop: x.drop || base.drop }); return; }
+    if (d.cdrop) { aplicarB({ ...base, drop: +d.cdrop }); return; }
+    if (d.ctcor) { aplicarB({ ...base, cor: d.ctcor }); }
+  };
+  render();
+  return { render };
+}
