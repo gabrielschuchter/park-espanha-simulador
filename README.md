@@ -16,10 +16,12 @@ npm run build    # gera dist/index.html (arquivo único, cerca de 870 KB, 250 KB
 
 ### Publicar no GitHub Pages
 
-Para publicar no GitHub Pages, abra Settings, Pages, escolha "GitHub Actions" como fonte e execute manualmente o workflow `Publicar no GitHub Pages` na aba Actions. O endereço fica em `https://<usuario>.github.io/<repositorio>/`. O `vite.config.js` já usa `base: './'`, então funciona em subpasta.
+O arquivo `.github/workflows/pages.yml` compila e publica `dist/` somente quando iniciado manualmente em Actions. No repositório, abra Settings, Pages, e escolha "GitHub Actions" como fonte. O endereço fica em `https://<usuario>.github.io/<repositorio>/`. O `vite.config.js` já usa `base: './'`, então funciona em subpasta.
 
 ## O que o simulador faz
 
+- **Passeio no centro, em dois modos.** O simulador abre de pé na entrada, em **Explorar**: só caminhar e olhar, com a tela limpa (sem barra, painéis ou ferramentas) e nenhuma edição possível, nem por clique acidental; apenas o interruptor de luz responde. **Editar** (botão embaixo da tela ou Tab) devolve a seleção, o carregar móvel, a pintura e os cartões de edição. Ao entrar no Passeio o modo volta sempre para Explorar. Passar de um cômodo a outro desliza a câmera em vez de teleportar, e o campo de visão abre um pouco ao correr.
+- **Estilos.** Biblioteca de 12 estilos (aconchegante, minimalista, contemporâneo, industrial, escandinavo, sofisticado, biofílico, terroso, colorido, cinema, praiano, rústico), cada um com versão para sala, cozinha, quarto, banheiro e serviço (60 presets por cômodo) e uma versão completa para o apartamento todo: paredes e destaques, piso, rodapé, forro, luz, cor e modelo dos móveis, decoração, peças da construtora e portas e esquadrias. A galeria mostra cada estilo em miniatura, descreve o que muda, deixa escolher o que aplicar (acabamentos, móveis, aberturas) e se parte dos móveis atuais ou do layout sugerido. "Aplicar e caminhar" leva ao Passeio com uma barra Manter ou Desfazer. Aplicar é uma única edição no histórico.
 - **3D primeiro.** A tela abre na maquete 3D em qualquer aparelho; a planta 2D fica a um toque ("Ver planta"). No celular a barra inferior concentra as ferramentas e o 3D ocupa a tela toda.
 - **Mover como em jogo.** No modo Passeio, escolher um móvel no catálogo faz um fantasma aparecer na mira. Ele acompanha o olhar, encaixa no piso, na parede, no teto ou em cima de outro móvel, muda de cor se colidir e aceita ajuste de altura e giro antes de confirmar. Também é possível pegar um móvel já colocado.
 - **Catálogo.** 160 itens em sala, quartos, cozinha (armários), eletrodomésticos, mesas e cadeiras, banheiro, serviço, trabalho, iluminação, decoração e uma categoria de medidas de escala (pessoas, cadeira de rodas, gabaritos de circulação). Móvel sob medida e "Meus móveis" continuam disponíveis.
@@ -55,6 +57,9 @@ Para publicar no GitHub Pages, abra Settings, Pages, escolha "GitHub Actions" co
 | `src/three/mobiliario.js`, `pessoas3d.js`, `helpers3d.js` | Armários paramétricos, eletrodomésticos, mesas com cadeiras, pessoas e escala |
 | `src/three/fixos3d.js` | Pia, tanque, louças e box com opções |
 | `src/three/` (demais) | Móveis básicos, texturas procedurais, esquadrias e forros |
+| `src/presets.js` | Motor dos estilos: troca modelos e cores dos móveis existentes e posiciona a decoração por âncoras (sofá, cama, pia…). Descarta o que colide, trava porta, cria aviso novo ou fecha passagem |
+| `src/data/estilos.js` | Os 12 estilos e seus presets por cômodo |
+| `src/ui/estilos.js` | Galeria, miniaturas em SVG, aplicação e barra de pré-visualização |
 | `src/store.js` | Estado, desfazer e refazer, salvamento automático, exportação e importação (`park-espanha/projeto@3`, lê também `@2`) |
 | `tools/` | `check-geometry.mjs`, `check-analysis.mjs` e `auditoria.mjs` (conferência das plantas e da escala); testes de navegador com Playwright; `galeria.py` gera a galeria do catálogo para conferência visual |
 | `docs/HIPOTESES.md` | O que é medida oficial, o que é estimativa e as incoerências encontradas |

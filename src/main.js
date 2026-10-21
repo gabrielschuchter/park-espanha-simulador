@@ -24,11 +24,14 @@ import { exportarPlantaPng, exportarPlantaSvg, exportarCsv, exportarFoto, itensP
 import { abrirTour, tourVisto } from './ui/tour.js';
 import { iniciarPecas, renderPecas, selecionarPeca, montarCartaoPeca, montarCartaoAbertura } from './ui/pecas.js';
 import { DICAS } from './data/dicas.js';
+import { iniciarEstilos, abrir as abrirEstilos, fechar as fecharEstilos, fecharPrev, aplicarTema } from './ui/estilos.js';
+import { TEMAS } from './data/estilos.js';
 
 let plan = null, plan2d = null, view3d = null, view3dLoading = null;
 let cartaoAtual = null;
 let viewMode = '2d', tool = 'moveis', ferrAberto = true, inspMobile = false, forroAuto = false, periodo = 'dia', paredesModo = 'recorte';
 let ultimaAnalise = { alertas: [], circ: null };
+let interacao = 'explorar', ultimoModo = null;
 
 // ======================================================================== som
 Som.montarControle($('#som-home'));
@@ -104,6 +107,8 @@ async function abrirEditor(novo = false) {
     car.prog(0.4); car.txt('Montando o 3D…'); await frame();
     // o 3D é a vista padrão em qualquer tela; a planta fica a um toque
     await setView('3d', true);
+    // o Passeio é a experiência principal: o apartamento abre em Explorar, de pé na entrada
+    { const v3 = await garantir3D(); if (v3.getMode() !== 'passeio') v3.setMode('passeio'); v3.setInteracao('explorar'); v3.irPara(null); atualizarImersivo(); }
     car.prog(0.9);
     agendarAnalise(0); renderInspetor(); atualizarHistorico(); atualizarStatus(); atualizarLayout();
     car.txt('Preparando os gráficos…'); await frame();
@@ -113,7 +118,7 @@ async function abrirEditor(novo = false) {
   if (novo || !tourVisto()) setTimeout(abrirTour, 500);
 }
 
-$('#btn-voltar').addEventListener('click', () => { salvarAgora(); $('#editor').hidden = true; $('#home').hidden = false; renderHome(); view3d?.setVisible(false); tocar('fechar'); });
+$('#btn-voltar').addEventListener('click', () => { fecharPrev(); fecharEstilos(); salvarAgora(); $('#editor').hidden = true; $('#home').hidden = false; renderHome(); view3d?.setVisible(false); tocar('fechar'); });
 $('#proj-nome').addEventListener('change', (ev) => renomear(ev.target.value.trim() || 'Meu apartamento'));
 $('#proj-nome').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') ev.target.blur(); });
 
@@ -123,7 +128,7 @@ async function garantir3D() {
   if (!view3dLoading) {
     view3dLoading = import('./three/view3d.js').then(({ createView3D }) => {
       view3d = createView3D($('#gl-host'), {
-        onMode: aoMudarModo,
+        onMode: aoMudarModo, onInteracao: aoMudarInteracao, onAlternarInteracao: alternarInteracao,
         onSuperficie: (info) => aplicar(info.tipo, info.room, info.edge, true),
         onInterruptor: alternarLuzComodo,
         onHover: dicaHover3d,
@@ -160,6 +165,7 @@ async function setView(v, inicial = false) {
     sincronizar3D();
   } else { view3d?.setVisible(false); }
   redesenharFerramentas();
+  atualizarImersivo();
   requestAnimationFrame(() => plan2d?.fit());
 }
 $$('.view-seg button').forEach((b) => b.addEventListener('click', () => { tocar('clique'); setView(b.dataset.view); }));
@@ -201,11 +207,69 @@ $('#b-paredes').addEventListener('click', async () => {
 $('#b-foto').addEventListener('click', async () => exportarFoto(await garantir3D()));
 $('#ir-para').addEventListener('change', async (ev) => { if (ev.target.value) { tocar('clique'); (await garantir3D()).irPara(ev.target.value); } ev.target.blur(); });
 
+$('#b-estilos').addEventListener('click', () => { view3d?.soltarCursor?.(); abrirEstilos(); });
+$('#rail-estilos').addEventListener('click', () => abrirEstilos());
+$('#b-casa').addEventListener('click', () => $('#btn-voltar').click());
+iniciarEstilos({
+  getPlan: () => plan,
+  aoAbrir: () => { view3d?.soltarCursor?.(); },
+  verNoPasseio: async (roomId) => {
+    if (viewMode === '2d') await setView('3d');
+    const v3 = await garantir3D();
+    if (v3.getMode() !== 'passeio') v3.setMode('passeio');
+    v3.setInteracao('explorar');
+    v3.irPara(roomId && roomId !== 'circ' ? roomId : null);
+    atualizarImersivo();
+  },
+});
+
 function preencherIrPara() {
   const opts = plan.rooms.filter((r) => r.id !== 'circ').map((r) => `<option value="${r.id}">${esc(r.nome)}</option>`).join('');
   $('#ir-para').innerHTML = `<option value="">Ir para…</option>${opts}`;
 }
+// ---------------------------------------------------------------- Explorar / Editar (Passeio)
+function atualizarImersivo() {
+  const passeio = view3d?.getMode() === 'passeio' && viewMode !== '2d';
+  const imersivo = passeio && interacao === 'explorar';
+  $('#editor').dataset.imersivo = imersivo ? '1' : '0';
+  $('#seg-int').hidden = !passeio;
+  $('#vista-3d').dataset.int = interacao;
+  $$('#seg-int [data-int]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.int === interacao)));
+  window.dispatchEvent(new Event('resize'));
+}
+function aoMudarInteracao(m) {
+  interacao = m;
+  if (m === 'explorar') {
+    select(null); if (cartaoAtual) fecharCartao(true);
+    inspMobile = false; $('#pop-uso').hidden = true;
+    forroAuto = false;
+    ferrAberto = false;
+  } else {
+    ferrAberto = !mobile();
+  }
+  atualizarLayout(); atualizarImersivo(); dicaDoModo('passeio');
+  tocar(m === 'editar' ? 'abrir' : 'fechar');
+}
+function alternarInteracao() { if (view3d?.getMode() !== 'passeio') return; view3d.soltarCursor?.(); view3d.setInteracao(interacao === 'explorar' ? 'editar' : 'explorar'); }
+$('#seg-int').addEventListener('click', (ev) => { const b = ev.target.closest('[data-int]'); if (b && view3d) { view3d.soltarCursor?.(); view3d.setInteracao(b.dataset.int); } });
+function dicaDoModo(m) {
+  const exp = interacao === 'explorar';
+  const hint = {
+    orbita: toque() ? 'Arraste para girar · pinça para aproximar · toque num móvel e arraste para mover' : 'Arraste para girar · botão direito move a câmera · role para aproximar · arraste um móvel para mover',
+    cima: 'Vista de cima com corte a 1,15 m',
+    passeio: exp
+      ? (toque() ? 'Joystick anda · arraste para olhar · Editar libera mover e pintar' : 'Clique na vista para olhar com o mouse (Esc solta) · W A S D andam · Shift corre · Tab muda para Editar')
+      : (toque() ? 'Joystick anda · arraste para olhar · mire em algo e use os botões que aparecem' : 'Clique edita o que está na mira · E pega · Tab volta para Explorar'),
+    forro: tool === 'teto' ? 'Vista de baixo para cima. Escolha o forro e clique no cômodo.' : 'Vista de baixo para cima: forro, sancas e luminárias',
+  }[m];
+  const h = $('#hint-3d'); h.textContent = hint; h.hidden = false;
+  clearTimeout(window.__hint); window.__hint = setTimeout(() => { h.hidden = true; }, 6000);
+}
+
 function aoMudarModo(m) {
+  const entrou = m === 'passeio' && ultimoModo !== 'passeio';
+  ultimoModo = m;
+  if (entrou && view3d && view3d.getInteracao() !== 'explorar') view3d.setInteracao('explorar');
   $$('#seg-modo [data-modo]').forEach((x) => x.classList.toggle('on', x.dataset.modo === m));
   $('#vista-3d').dataset.modo = m;
   $('#joy').hidden = !(m === 'passeio' && toque());
@@ -213,14 +277,8 @@ function aoMudarModo(m) {
   $('#vista-3d').dataset.mouse = toque() ? '0' : '1';
   if (m !== 'passeio') aoMirar(null);
   else if (mobile() && ferrAberto) { ferrAberto = false; atualizarLayout(); } // no passeio o 3D ocupa a tela toda
-  const hint = {
-    orbita: toque() ? 'Arraste para girar · pinça para aproximar · toque num móvel e arraste para mover' : 'Arraste para girar · botão direito move a câmera · role para aproximar · arraste um móvel para mover',
-    cima: 'Vista de cima com corte a 1,15 m',
-    passeio: toque() ? 'Joystick anda · arraste para olhar · mire em algo e use os botões que aparecem' : 'Clique na vista para olhar com o mouse (Esc solta) · W A S D andam · clique edita o que está na mira · E pega',
-    forro: tool === 'teto' ? 'Vista de baixo para cima. Escolha o forro e clique no cômodo.' : 'Vista de baixo para cima: forro, sancas e luminárias',
-  }[m];
-  const h = $('#hint-3d'); h.textContent = hint; h.hidden = false;
-  clearTimeout(window.__hint); window.__hint = setTimeout(() => { h.hidden = true; }, 6000);
+  dicaDoModo(m);
+  atualizarImersivo();
   $('#ir-para').value = '';
   syncBarras();
 }
@@ -958,7 +1016,10 @@ function acao(a) {
       <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> refaz, <kbd>Ctrl</kbd>+<kbd>D</kbd> duplica, <kbd>Delete</kbd> exclui, <kbd>Esc</kbd> cancela a seleção.</li>
       <li><b>Paredes, Piso e Teto:</b> escolha uma amostra e clique na superfície. “Uma parede” pinta só a parede clicada, “Cômodo” pinta o ambiente e “Todos” aplica a todos, menos aos banheiros.</li>
       <li><b>Luz:</b> clique no interruptor na parede (3D) ou no botão de lâmpada na planta. A luz de verdade aparece em “Noite”.</li>
-      <li><b>Passeio 3D:</b> no computador, clique na vista para prender o cursor: o mouse olha, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> andam, <kbd>Shift</kbd> corre, o clique edita (ou pinta, com uma ferramenta aberta) o que está na mira, <kbd>E</kbd> pega móvel ou peça, <kbd>F</kbd> abre portas e <kbd>Esc</kbd> solta o cursor. No celular, joystick anda (na borda corre), arrastar olha, pinça aproxima, e as ações ficam nos botões que aparecem ao mirar.</li>
+      <li><b>Passeio 3D, Explorar:</b> é o modo de entrada. Você só caminha e olha; nada é selecionado, movido ou pintado por acidente (só o interruptor de luz responde). No computador, clique na vista para prender o cursor: o mouse olha, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> andam, <kbd>Shift</kbd> corre, <kbd>Esc</kbd> solta o cursor. No celular, o joystick anda e o arrasto olha. “Ir para…” leva a um cômodo.</li>
+      <li><b>Passeio 3D, Editar:</b> alterne em <kbd>Tab</kbd> ou no botão Explorar/Editar na parte de baixo da tela. Em Editar, o clique edita (ou pinta, com uma ferramenta aberta) o que está na mira, <kbd>E</kbd> pega o móvel, <kbd>Q</kbd>/<kbd>E</kbd> giram e <kbd>R</kbd>/<kbd>F</kbd> sobem e descem. Ao voltar para Explorar, os painéis somem e a tela fica só com o apartamento.</li>
+      <li><b>Estilos:</b> o botão Estilos abre a galeria. Cada estilo muda o apartamento inteiro (ou só um cômodo, na aba “Por cômodo”): paredes, piso, forro, luz, móveis e decoração. “Aplicar e caminhar” leva você ao Passeio para ver o resultado e permite desfazer.</li>
+
       <li><b>Editar uma coisa só:</b> clique numa peça da construtora, porta, janela, parede, piso ou teto para abrir o cartão de edição dela. Peças podem ser arrastadas no 3D e na planta, giradas, ocultadas e voltar ao lugar original. Portas podem ser retiradas e recolocadas.</li>
       <li><b>Maquete 3D:</b> arraste para girar, roda do mouse ou pinça para aproximar até o ponto sob o cursor ou entre os dedos, botão direito ou dois dedos para deslocar. Duplo clique ou duplo toque aproxima do ponto; outro duplo clique volta ao enquadramento geral.</li>
       <li><b>Colocar móvel olhando:</b> no Passeio, escolha um móvel no catálogo. Ele aparece na mira, verde se cabe e vermelho se sobrepõe. Olhe para o chão, uma parede, o teto ou o tampo de outro móvel. <kbd>Q</kbd>/<kbd>E</kbd> giram, <kbd>R</kbd>/<kbd>F</kbd> sobem e descem 5 cm, clique ou <kbd>Enter</kbd> coloca, <kbd>Esc</kbd> cancela. Com a mira num móvel, <kbd>E</kbd> pega para mover e <kbd>F</kbd> abre ou fecha.</li>
@@ -1038,5 +1099,5 @@ window.__pe = {
   store, Som, get plan() { return plan; }, get view3d() { return view3d; }, get plan2d() { return plan2d; },
   FIX_SCHEMA, AB_SCHEMA, setFixo, setAberturas, setView, setTool, garantir3D, aplicar, analise: () => ultimaAnalise, adicionar, trocarPeriodo,
   luzDe: (r) => luzDe(store.projeto.acab, r),
-  uso, setUso, alternarUsoItem, estadoDe, catalogoPorId, select, editarAlvo,
+  uso, setUso, alternarUsoItem, estadoDe, catalogoPorId, select, editarAlvo, aplicarTema, TEMAS, undo,
 };

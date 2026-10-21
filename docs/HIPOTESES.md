@@ -117,3 +117,13 @@ O que continua estimado e pode explicar diferenças de sensação: espessura das
 ## Peças e aberturas editáveis
 
 Pia, tanque, bacia, lavatório e box podem ser movidos, girados, ocultados e restaurados; a posição original fica guardada. Portas podem ser retiradas (fica o vão e o batente) e recolocadas; janelas podem ser ocultadas (fica o vão) e recolocadas. Porta retirada deixa de contar nos avisos de giro de porta. Largura e posição dos vãos seguem a planta. Paredes não mudam.
+
+## Estilos de decoração (v7)
+
+Os estilos são sugestões de ambientação, não projeto. Três pontos para quem for ler os resultados com espírito crítico.
+
+**O que é verificado e o que não é.** A cada aplicação, o motor confere colisão, varredura das portas, avisos da análise e circulação (grade de 5 cm). Peça que cria aviso novo, trava porta ou fecha passagem é descartada, e troca de modelo que piora a análise é desfeita (fica só a cor). Para as três plantas (Meio, Ponta e PCD) e os 12 estilos, `node tools/presets-check.mjs` termina sem aviso novo e sem regressão de circulação em relação ao layout sugerido. Isso garante coerência geométrica dentro das hipóteses já documentadas, não que o resultado seja confortável para uma família real. Como as plantas diferem, o mesmo estilo aceita mais peças em uma tipologia que em outra: o relatório de aplicação soma peças colocadas e descartadas, e boa parte dos descartes é esperada em salas pequenas.
+
+**Cores e materiais.** Os nomes de cor dos estilos ("Areia quente", "Grafite quente") são livres, sem código de marca. Tela não reproduz tinta, e o leque físico continua sendo a referência. Acabamentos como mármore, cimento e madeira são texturas procedurais, não amostras de fornecedor.
+
+**Limite de escopo.** Estilo não altera paredes nem posição de pia, tanque ou louças. Portas e esquadrias só mudam de cor e de vidro (cinema usa vidro fumê). Em Explorar não há edição; no 3D só o interruptor de luz responde.

@@ -655,6 +655,9 @@ export function createView3D(container, opts = {}) {
   // ------------------------------------------------------------ câmeras e modos
   const walk = { yaw: 0, pitch: 0, yawT: 0, pitchT: 0, vYaw: 0, vPitch: 0, pos: new THREE.Vector3(), mv: [0, 0], vf: 0, vs: 0, keys: new Set(), raio: 0.2, acum: 0, fase: 0, bob: 0 };
   const olharJa = (yaw, pitch) => { walk.yaw = walk.yawT = yaw; walk.pitch = walk.pitchT = pitch; walk.vYaw = walk.vPitch = 0; };
+  // Passeio tem duas formas de interação: 'explorar' (padrão, só olhar, andar e acender luz) e 'editar'
+  let interacao = 'explorar';
+  const editando = () => interacao === 'editar';
   // olhos de uma pessoa de ~1,72 m; passo de ~0,72 m a 1,4 m/s (caminhada normal)
   const EYE = 1.62;
   let anim = null;
@@ -749,7 +752,7 @@ export function createView3D(container, opts = {}) {
     }
     return best;
   }
-  function irPara(roomId) {
+  function irPara(roomId, animar = false) {
     let x, z, lx, lz;
     if (roomId && !plan.rooms.some((q) => q.id === roomId)) roomId = null;
     if (!roomId) { [x, z] = plan.tip.pontos.inicio; [lx, lz] = plan.tip.pontos.olhar; }
@@ -783,10 +786,30 @@ export function createView3D(container, opts = {}) {
       }
       [lx, lz] = far;
     }
+    const x0 = walk.pos.x, z0 = walk.pos.z, yaw0 = walk.yaw, p0 = walk.pitch;
     walk.pos.set(x, EYE, z);
     olharJa(Math.atan2(lx - x, -(lz - z)), -0.08);
     resolverColisao();
+    // transição curta em vez de teletransporte (só quando já havia uma posição anterior)
+    if (animar && (x0 || z0) && Math.hypot(walk.pos.x - x0, walk.pos.z - z0) > 0.05) {
+      walkAnim = { t0: performance.now(), x0, z0, yaw0, p0, x1: walk.pos.x, z1: walk.pos.z, yaw1: walk.yaw, p1: walk.pitch, ms: Math.min(1100, 450 + Math.hypot(walk.pos.x - x0, walk.pos.z - z0) * 90) };
+      walk.pos.set(x0, EYE, z0); olharJa(yaw0, p0);
+    }
     aplicarCamWalk(); atualizarPool();
+  }
+  let walkAnim = null;
+  function passoAnim(now) {
+    const a = walkAnim; if (!a) return false;
+    if (walk.keys.size || Math.hypot(walk.mv[0], walk.mv[1]) > 0.05) { walkAnim = null; return false; }
+    const k = Math.min(1, (now - a.t0) / a.ms), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    let dy = a.yaw1 - a.yaw0; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); // menor giro
+    walk.pos.set(a.x0 + (a.x1 - a.x0) * e, EYE, a.z0 + (a.z1 - a.z0) * e);
+    olharJa(a.yaw0 + dy * e, a.p0 + (a.p1 - a.p0) * e);
+    // pequeno balanço de caminhada durante o trajeto
+    walk.bob = Math.sin(e * Math.PI * Math.max(2, a.ms / 260)) * 0.012 * Math.sin(e * Math.PI);
+    if (k >= 1) { walkAnim = null; walk.bob = 0; olharJa(walk.yaw, a.p1); }
+    aplicarCamWalk();
+    return true;
   }
 
   function obstaculos() {
@@ -866,6 +889,11 @@ export function createView3D(container, opts = {}) {
     const vm = Math.hypot(walk.vf, walk.vs);
     if (vm < 0.02 && alvoF === 0 && alvoS === 0) walk.vf = walk.vs = 0;
 
+    // ao correr, o campo de visão abre um pouco (sensação de velocidade)
+    if (!fovManual) {
+      const fa = fovAuto() + (vm > VEL_ANDAR * 1.25 ? 3.5 : 0);
+      if (Math.abs(camera.fov - fa) > 0.02) { camera.fov += (fa - camera.fov) * (1 - Math.exp(-dt * 6)); camera.updateProjectionMatrix(); dirty = true; }
+    }
     if (vm >= 0.02) {
       const corre = vm > VEL_ANDAR * 1.25;
       const x0 = walk.pos.x, z0 = walk.pos.z;
@@ -936,7 +964,8 @@ export function createView3D(container, opts = {}) {
     const h = ray.intersectObjects(alvo, true)[0];
     return h && h.object.userData.sw && h.distance < 7 ? h.object.userData.sw : null;
   }
-  function superficieDaFerramenta() { return { paredes: 'parede', piso: 'piso', teto: 'teto' }[ferramenta] || null; }
+  // Passeio em modo Explorar: nenhuma ferramenta de edição age (só olhar, andar e acender luz)
+  function superficieDaFerramenta() { if (mode === 'passeio' && interacao !== 'editar') return null; return { paredes: 'parede', piso: 'piso', teto: 'teto' }[ferramenta] || null; }
   function pickSuperficie(ev) {
     const tipo = superficieDaFerramenta(); if (!tipo) return null;
     apontar(ev);
@@ -1072,6 +1101,7 @@ export function createView3D(container, opts = {}) {
     const c = centroTela();
     const sw = pickInterruptor(c);
     if (sw) { opts.onInterruptor?.(sw); return; }
+    if (!editando()) return;
     if (superficieDaFerramenta()) { const info = pickSuperficie(c); if (info) { mostrarHover(info); opts.onSuperficie?.(info, { escopo }); } return; }
     apontar(c);
     const a = descreverAlvo(alvoDoRaio(ray, { maxObj: 3.4, maxSup: 5 }));
@@ -1082,6 +1112,7 @@ export function createView3D(container, opts = {}) {
     if (carry.ativo) { confirmarCarry(); return; }
     const sw = pickInterruptor(ev);
     if (sw) { opts.onInterruptor?.(sw); return; }
+    if (!editando()) return;
     if (superficieDaFerramenta()) { const info = pickSuperficie(ev); if (info) { mostrarHover(info); opts.onSuperficie?.(info, { escopo }); } return; }
     apontar(ev);
     const a = descreverAlvo(alvoDoRaio(ray, { maxObj: 9, maxSup: 9 }));
@@ -1128,6 +1159,7 @@ export function createView3D(container, opts = {}) {
   });
   el.addEventListener('pointermove', (ev) => {
     if (mode === 'passeio' && cursorPreso()) {
+      walkAnim = null;
       const k = 0.0032 * (camera.fov / fovAuto());
       walk.yawT += (ev.movementX || 0) * k; walk.pitchT = Math.max(-1.25, Math.min(1.25, walk.pitchT - (ev.movementY || 0) * k));
       dirty = true; return;
@@ -1141,6 +1173,7 @@ export function createView3D(container, opts = {}) {
         camera.updateProjectionMatrix(); dirty = true; return;
       }
       if (down && down.id === ev.pointerId) {
+        if (down.moveu) walkAnim = null;
         if (!down.moveu && Math.hypot(ev.clientX - down.x, ev.clientY - down.y) <= 4) return;
         // incremental, sem salto ao passar da folga de 4 px. Ganho fixo em rad/px (mouse ~0,29°/px, dedo ~0,42°/px),
         // reduzido na mesma proporção quando o zoom do Passeio fecha o campo de visão.
@@ -1209,7 +1242,7 @@ export function createView3D(container, opts = {}) {
     } else {
       const sw = pickInterruptor(ev);
       if (sw) { el.style.cursor = 'pointer'; const r = plan.rooms.find((q) => q.id === sw); opts.onHover?.(`Interruptor · ${r.nome}`, ev.clientX, ev.clientY); return; }
-      if (mode === 'forro') { el.style.cursor = ''; opts.onHover?.(null); return; }
+      if (mode === 'forro' || (mode === 'passeio' && !editando())) { el.style.cursor = ''; opts.onHover?.(null); return; }
       apontar(ev);
       const a = descreverAlvo(alvoDoRaio(ray, { maxObj: mode === 'passeio' ? 9 : Infinity, maxSup: -1 }));
       if (!a) { el.style.cursor = ''; opts.onHover?.(null); return; }
@@ -1293,7 +1326,9 @@ export function createView3D(container, opts = {}) {
   const onKey = (isDown) => (ev) => {
     if (mode !== 'passeio' || !visivel) return;
     if (ev.target.closest && ev.target.closest('input,textarea,select')) return;
-    if (isDown && !ev.ctrlKey && !ev.metaKey) {
+    if (isDown && ev.code === 'Tab' && !ev.repeat) { ev.preventDefault(); opts.onAlternarInteracao?.(); return; }
+    if (isDown && !editando()) { /* Explorar: só movimento */ }
+    else if (isDown && !ev.ctrlKey && !ev.metaKey) {
       if (carry.ativo) {
         const k = ev.code, big = ev.shiftKey ? 90 : 15;
         if (k === 'KeyQ') { girarCarry(-big); ev.preventDefault(); return; }
@@ -1495,7 +1530,8 @@ export function createView3D(container, opts = {}) {
     if (now - mira.t < 110) return; mira.t = now;
     camera.updateMatrixWorld();
     rayM.setFromCamera(new THREE.Vector2(0, 0), camera); rayM.far = 7;
-    const a = alvoDoRaio(rayM, { maxObj: 3.4, maxSup: 5 });
+    let a = alvoDoRaio(rayM, { maxObj: 3.4, maxSup: 5 });
+    if (!editando() && a?.kind !== 'interruptor') a = null; // Explorar: a mira só reconhece o interruptor
     const key = chaveAlvo(a);
     if (key === mira.key) return;
     mira.key = key; mira.uid = a?.kind === 'item' ? a.uid : null;
@@ -1551,7 +1587,7 @@ export function createView3D(container, opts = {}) {
       if (k >= 1) { scene.remove(flash.g); flash = null; } else flash.m.opacity = 0.7 * (1 - k);
       dirty = true;
     }
-    if (mode === 'passeio') passoWalk(dt);
+    if (mode === 'passeio') { if (!passoAnim(now)) passoWalk(dt); }
     else { if (controls.update()) dirty = true; limitarAlvo(); }
     if (estAnimando) animEstados(dt);
     if (carry.ativo) atualizarCarry();
@@ -1588,6 +1624,15 @@ export function createView3D(container, opts = {}) {
     refreshLuz() { if (!plan) return; aplicarEmissivos(); atualizarPool(); atualizarPontos(); },
     setMode(m) { if (m === mode) return; if (m !== 'passeio') cancelarCarry(); mode = m; walk.keys.clear(); aplicarModo(); opts.onMode?.(m); },
     getMode: () => mode,
+    getInteracao: () => interacao,
+    setInteracao(m) {
+      m = m === 'editar' ? 'editar' : 'explorar';
+      if (m === interacao) return;
+      interacao = m;
+      if (m === 'explorar') { cancelarCarry(); mostrarHover(null); opts.onHover?.(null); }
+      mira.key = '?'; mira.t = 0; // força nova leitura da mira
+      opts.onInteracao?.(m); dirty = true;
+    },
     setPeriodo(l) { periodo = l; aplicarPeriodo(); },
     getPeriodo: () => periodo,
     setParedes(m) { paredesModo = m; if (mode === 'orbita') { corte.constant = m === 'baixas' ? 1.15 : 99; } atualizarRecorte(0, true); requestRender(); },
@@ -1595,7 +1640,7 @@ export function createView3D(container, opts = {}) {
     realcarCartao, soltarCursor, prenderCursor, acaoNaMira, cursorPreso,
     setEscopo(e) { escopo = e; hoverKey = ''; if (hoverInfo) mostrarHover(hoverInfo); },
     pulsar,
-    irPara(roomId) { if (mode !== 'passeio') { mode = 'passeio'; aplicarModo(); opts.onMode?.(mode); } irPara(roomId); },
+    irPara(roomId) { if (mode !== 'passeio') { mode = 'passeio'; aplicarModo(); opts.onMode?.(mode); irPara(roomId); return; } irPara(roomId, true); },
     moveInput(x, y) { walk.mv = [x, y]; },
     rayDebug() { camera.updateMatrixWorld(); rayM.setFromCamera(new THREE.Vector2(0, 0), camera); rayM.far = 5; return rayM.intersectObjects(alvosMira(), true).slice(0, 6).map((q) => ({ n: q.object.name || q.object.type, uid: q.object.userData.uid, sup: q.object.userData.surface, d: +q.distance.toFixed(2), p: [q.point.x, q.point.y, q.point.z].map((v) => +v.toFixed(2)), nrm: q.face ? [q.face.normal.x, q.face.normal.y, q.face.normal.z].map((v) => +v.toFixed(2)) : null })); },
     olhar(yaw, pitch = 0) { olharJa(yaw, pitch); aplicarCamWalk(); },
