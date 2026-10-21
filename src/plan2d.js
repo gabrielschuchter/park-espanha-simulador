@@ -166,7 +166,7 @@ export function createPlan2D(host, opts = {}) {
     </defs>
     <g class="world">
       <g class="l-rooms"></g><g class="l-circ"></g><g class="l-fix"></g><g class="l-open"></g>
-      <g class="l-walls"></g><g class="l-alert"></g><g class="l-items"></g><g class="l-dist"></g>
+      <g class="l-walls"></g><g class="l-alert"></g><g class="l-items"></g><g class="l-dist"></g><g class="l-obra"></g>
     </g>
     <g class="screen"><g class="l-labels"></g><g class="l-cotas"></g><g class="l-dlabels"></g><g class="l-handles"></g><g class="l-badges"></g></g>`;
   const $ = (c) => svg.querySelector(c);
@@ -174,7 +174,7 @@ export function createPlan2D(host, opts = {}) {
   const L = {
     rooms: $('.l-rooms'), circ: $('.l-circ'), fix: $('.l-fix'), open: $('.l-open'), walls: $('.l-walls'),
     alert: $('.l-alert'), items: $('.l-items'), dist: $('.l-dist'),
-    labels: $('.l-labels'), cotas: $('.l-cotas'), dlabels: $('.l-dlabels'), handles: $('.l-handles'), badges: $('.l-badges'),
+    obra: $('.l-obra'), labels: $('.l-labels'), cotas: $('.l-cotas'), dlabels: $('.l-dlabels'), handles: $('.l-handles'), badges: $('.l-badges'),
   };
 
   let plan = null, analise = { alertas: [], circ: null };
@@ -240,12 +240,17 @@ export function createPlan2D(host, opts = {}) {
     for (const r of plan.rooms) {
       h += `<polygon points="${ptsAttr(r.poly)}" class="room" data-room="${r.id}" style="fill:${pisoDe(store.projeto?.acab, r).cor2d}" />`;
     }
+    for (const rm of plan.tip.remendos || []) {
+      const c = rm.poly.reduce((a, q) => [a[0] + q[0] / 4, a[1] + q[1] / 4], [0, 0]);
+      const viz = plan.rooms.find((r) => [0.2, -0.2].some((d) => { const e = [rm.poly[1][0] - rm.poly[0][0], rm.poly[1][1] - rm.poly[0][1]], l = Math.hypot(...e) || 1; return pointInPoly(c[0] - e[1] / l * d, c[1] + e[0] / l * d, r.poly); }));
+      h += `<polygon points="${ptsAttr(rm.poly)}" class="room remendo" style="fill:${viz ? pisoDe(store.projeto?.acab, viz).cor2d : '#eee'}" />`;
+    }
     for (const r of plan.rooms) h += `<polygon points="${ptsAttr(r.poly)}" class="room-hit" data-room="${r.id}" />`;
     L.rooms.innerHTML = h;
     h = '';
     for (const p of plan.pieces) {
       if (p.verga) continue;
-      const cls = p.sob ? 'wall sob' : p.w.guarda ? 'wall guarda' : 'wall';
+      const cls = p.sob ? 'wall sob' : p.w.guarda ? 'wall guarda' : p.w.obra ? `wall obra obra-${p.w.obra}` : 'wall';
       h += `<polygon points="${ptsAttr(p.poly)}" class="${cls}" />`;
     }
     L.walls.innerHTML = h;
@@ -536,6 +541,7 @@ export function createPlan2D(host, opts = {}) {
       drag = { kind: 'pinch', d0: Math.hypot(a[0] - b[0], a[1] - b[1]), m0: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], s0: view.s, tx0: view.tx, ty0: view.ty, pan: true };
       return;
     }
+    if (ferramenta === 'obra') { drag = { kind: 'pan', sx: p[0], sy: p[1], tx0: view.tx, ty0: view.ty, pan: true, moved: false }; return; }
     const hEl = ev.target.closest('.handle');
     const itEl = ev.target.closest('.item');
     const sel = store.projeto.itens.find((i) => i.uid === store.sel);
@@ -561,7 +567,7 @@ export function createPlan2D(host, opts = {}) {
 
   svg.addEventListener('pointermove', (ev) => {
     if (!pointers.has(ev.pointerId)) {
-      // cursor
+      if (ferramenta === 'obra' && plan) { const [wx, wy] = S2W(...rel(ev)); opts.onObra?.({ tipo: 'move', x: wx, y: wy, shift: ev.shiftKey || ev.altKey }); }
       return;
     }
     const p = rel(ev);
@@ -632,7 +638,10 @@ export function createPlan2D(host, opts = {}) {
     if (!drag) return;
     if (drag.kind === 'pinch') { if (pointers.size === 0) drag = null; aplicarView(); return; }
     if (drag.kind === 'pan') {
-      if (!drag.moved) {
+      if (!drag.moved && ferramenta === 'obra') {
+        const [wx, wy] = S2W(...rel(ev));
+        opts.onObra?.({ tipo: ev.button === 2 ? 'cancel' : 'click', x: wx, y: wy, shift: ev.shiftKey || ev.altKey, toque: ev.pointerType !== 'mouse' });
+      } else if (!drag.moved) {
         const sup = ferramenta === 'paredes' || ferramenta === 'piso' || ferramenta === 'teto';
         const [wx, wy] = S2W(...rel(ev));
         const r = plan.rooms.find((q) => pointInPoly(wx, wy, q.poly));
@@ -659,13 +668,33 @@ export function createPlan2D(host, opts = {}) {
     const [sx, sy] = rel(ev);
     if (ev.ctrlKey || Math.abs(ev.deltaY) > 0) zoomAt(sx, sy, Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.01 : 0.0018)));
   }, { passive: false });
+  svg.addEventListener('contextmenu', (ev) => { if (ferramenta === 'obra') ev.preventDefault(); });
   svg.addEventListener('dblclick', (ev) => { if (!ev.target.closest('.item')) fit(); });
 
   const ro = new ResizeObserver(() => { if (plan) { const keep = view.s; if (!host.dataset.fitted) { fit(); host.dataset.fitted = '1'; } else { void keep; aplicarView(); } } });
   ro.observe(host);
 
   return {
-    setPlan(p) { plan = p; host.dataset.fitted = ''; desenharPlanta(); requestAnimationFrame(() => { fit(); host.dataset.fitted = '1'; }); },
+    setPlan(p, manter = false) { plan = p; if (manter) { desenharPlanta(); desenharItens(); desenharTela(); return; } host.dataset.fitted = ''; desenharPlanta(); requestAnimationFrame(() => { fit(); host.dataset.fitted = '1'; }); },
+    setObraPreview(sp) {
+      if (!plan) return;
+      let h = '';
+      if (sp?.sel) for (const id of [].concat(sp.sel)) for (const pc of plan.pieces.filter((q) => q.w.id === id && !q.verga)) h += `<polygon points="${ptsAttr(pc.poly)}" class="obra-sel" />`;
+      if (sp?.vao) {
+        const w = plan.tip.walls.find((q) => q.id === sp.vao.wall);
+        if (w) { const hh = w.t / 2 + 0.05; h += `<polygon points="${ptsAttr([wallPoint(w, sp.vao.de, -hh), wallPoint(w, sp.vao.de + sp.vao.largura, -hh), wallPoint(w, sp.vao.de + sp.vao.largura, hh), wallPoint(w, sp.vao.de, hh)])}" class="obra-vao ${sp.vao.ok ? 'ok' : 'nao'}" />`; }
+      }
+      if (sp?.linha) {
+        const { a, b, t, ok } = sp.linha, L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (L > 0.01) {
+          const w = { a, b, t };
+          h += `<polygon points="${ptsAttr([wallPoint(w, 0, -t / 2), wallPoint(w, L, -t / 2), wallPoint(w, L, t / 2), wallPoint(w, 0, t / 2)])}" class="obra-linha ${ok ? 'ok' : 'nao'}" />`;
+        }
+      }
+      if (sp?.ponto) h += `<circle cx="${f2(sp.ponto[0])}" cy="${f2(sp.ponto[1])}" r="0.06" class="obra-ponto ${sp.pontoTipo || ''}" />`;
+      if (sp?.inicio) h += `<circle cx="${f2(sp.inicio[0])}" cy="${f2(sp.inicio[1])}" r="0.05" class="obra-ponto inicio" />`;
+      L.obra.innerHTML = h;
+    },
     redrawFixos() { if (plan) desenharFixos(); },
     redrawItems() { if (!plan) return; desenharItens(); desenharTela(); desenharDistancias(); },
     setAnalise(a) { analise = a; if (plan) { desenharItens(); desenharCirculacao(); } },

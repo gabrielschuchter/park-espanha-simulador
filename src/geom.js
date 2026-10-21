@@ -253,5 +253,5 @@ export function aplicarFixos(plan, fix) {
     f.oculto = !!o.oculto; f.movido = !!o.pos;
   }
   // portas retiradas e janelas ocultas: o vão continua, sem folha nem caixilho
-  for (const o of plan.openings) o.sem = !!fix?.[o.id]?.sem;
+  for (const o of plan.openings) o.sem = !!fix?.[o.id]?.sem || !!o.passagem;
 }

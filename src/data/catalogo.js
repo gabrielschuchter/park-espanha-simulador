@@ -42,6 +42,7 @@ export const CATALOGO = [
   I('sofaret', 'sala', 'Sofá retrátil', 2.00, 1.00, 0.95, 'sofa', { cor: '#3f5f6b', paleta: 'tecido', retratil: true, frente: 0.40 }),
   I('sofachaise', 'sala', 'Sofá com chaise', 2.30, 1.50, 0.85, 'sofaChaise', { cor: '#c9bfae', paleta: 'tecido' }),
   I('sofacanto', 'sala', 'Sofá de canto em L', 2.60, 1.70, 0.85, 'sofaCanto', { cor: '#6f6a64', paleta: 'tecido' }),
+  I('cadeiravaranda', 'sala', 'Poltrona de varanda', 0.62, 0.66, 0.78, 'poltrona', { cor: '#c9a77c', paleta: 'tecido' }),
   I('poltrona', 'sala', 'Poltrona', 0.75, 0.80, 0.85, 'poltrona', { cor: '#b46a4c', paleta: 'tecido' }),
   I('rack', 'sala', 'Rack', 1.80, 0.40, 0.50, 'rack', { cor: '#a5774b', paleta: 'madeira', parede: true }),
   I('racksusp', 'sala', 'Rack suspenso', 1.80, 0.35, 0.30, 'rack', { elev: 0.35, cor: '#c9a77c', paleta: 'madeira', parede: true }),
@@ -127,6 +128,7 @@ export const CATALOGO = [
   I('jantarbanco', 'jantar', 'Mesa encostada com banco', 1.60, 0.95, 0.76, 'mesaJ', { cor: '#c9a77c', cor2: '#2f2e2c', paleta: 'madeira', parede: true, cfg: { forma: 'ret', lugares: 4, estilo: 'madeira', encosto: true, corBanco: '#6f6a64' } }),
   I('mesaalta', 'jantar', 'Mesa alta com banquetas', 1.20, 1.20, 1.05, 'mesaJ', { cor: '#2f2e2c', cor2: '#c9a77c', paleta: 'madeira', cfg: { forma: 'ret', lugares: 4, estilo: 'banqueta', alta: true, baseMetal: true } }),
   I('mesaret', 'jantar', 'Mesa retangular', 1.20, 0.80, 0.76, 'mesa', { cor: '#c9a77c', paleta: 'madeira' }),
+  I('mesabistro', 'jantar', 'Mesa bistrô com 2 cadeiras', 0.70, 1.25, 0.74, 'mesaJ', { cor: '#2f2e2c', cor2: '#2f2e2c', paleta: 'metal', cfg: { forma: 'red', lugares: 2, estilo: 'madeira', baseMetal: true } }),
   I('cadeira', 'jantar', 'Cadeira', 0.45, 0.52, 0.85, 'cadeira', { cor: '#2f2e2c', paleta: 'madeira' }),
   I('banqueta', 'jantar', 'Banqueta alta', 0.40, 0.40, 0.75, 'banqueta', { cor: '#2f2e2c', paleta: 'metal' }),
   // ------------------------------------------------------------------ Banheiro

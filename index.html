@@ -96,6 +96,7 @@
         <button data-tool="piso" title="Trocar o piso"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-5 9 5-9 5zM3 9v4l9 5 9-5V9M12 14v5" /></svg><span>Piso</span></button>
         <button data-tool="teto" title="Forro, sanca e rebaixo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 5v4h4v3h10V9h4V5M7 12v3M17 12v3" /></svg><span>Teto</span></button>
         <button data-tool="luz" title="Luzes e luminárias"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0012 3z" /></svg><span>Luz</span></button>
+        <button data-tool="obra" title="Obra: construir, demolir e abrir vãos nas paredes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V10h6v11M11 14h8v7M7 13h2M7 16h2M14 17h3M8 10V6l3-3 3 3v4" /></svg><span>Obra</span></button>
         <button data-tool="fixos" title="Pia, tanque, louças, box, portas e janelas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h16M6 11v5a4 4 0 004 4h4a4 4 0 004-4v-5M9 11V6a2 2 0 012-2h1M15 20v1M9 20v1" /></svg><span>Peças</span></button>
         <button id="rail-estilos" title="Estilos de decoração"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6-4.6-1.9 4.6-1.9zM18.5 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" /></svg><span>Estilos</span></button>
         <span class="rail-esp"></span>
@@ -156,6 +157,17 @@
           <div class="luz-lista" id="luz-lista"></div>
           <h3 class="sub">Luminárias</h3>
           <div class="cat-grid" id="luz-grid"></div>
+        </div>
+
+        <div class="tp" data-tp="obra" hidden>
+          <div class="painel-head"><h2>Obra</h2><button class="icon-btn so-mobile" data-fechar="ferr" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
+          <div class="seg seg-full" id="obra-modo" role="tablist" aria-label="O que fazer">
+            <button role="tab" data-om="parede">Construir</button><button role="tab" data-om="vao">Abrir vão</button><button role="tab" data-om="sel">Editar</button>
+          </div>
+          <p class="dica" id="obra-dica"></p>
+          <div id="obra-corpo"></div>
+          <div class="acoes-row"><button class="btn btn-sm" id="obra-cima">Ver de cima</button><button class="btn btn-sm btn-ghost" id="obra-original">Voltar à planta original</button></div>
+          <p class="nota">Simulação. Demolir ou abrir vão em parede de prédio pode ser proibido (alvenaria estrutural) e sempre depende de projeto, responsável técnico e autorização do condomínio e da construtora. As fachadas não podem ser removidas aqui.</p>
         </div>
 
         <div class="tp" data-tp="fixos" hidden>
@@ -278,6 +290,7 @@
       <button data-tool="piso"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-5 9 5-9 5zM3 9v4l9 5 9-5V9M12 14v5" /></svg><span>Piso</span></button>
       <button data-tool="teto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 5v4h4v3h10V9h4V5M7 12v3M17 12v3" /></svg><span>Teto</span></button>
       <button data-tool="luz"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0012 3z" /></svg><span>Luz</span></button>
+      <button data-tool="obra"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V10h6v11M11 14h8v7M7 13h2M7 16h2M14 17h3M8 10V6l3-3 3 3v4" /></svg><span>Obra</span></button>
       <button data-tool="fixos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h16M6 11v5a4 4 0 004 4h4a4 4 0 004-4v-5M9 11V6a2 2 0 012-2h1" /></svg><span>Peças</span></button>
       <button data-tool="dicas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6-4.6-1.9 4.6-1.9z" /></svg><span>Dicas</span></button>
       <button data-tool="resumo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7" /></svg><span>Resumo</span></button>

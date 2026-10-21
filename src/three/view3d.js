@@ -128,6 +128,15 @@ export function createView3D(container, opts = {}) {
     }
     return cacheParede.get(key);
   }
+  const cacheObra = new Map();
+  function matObra(w) {
+    if (w.obra === 'vidro') {
+      if (!cacheObra.has('vidro')) cacheObra.set('vidro', new THREE.MeshStandardMaterial({ color: '#cfe3ea', transparent: true, opacity: 0.25, roughness: 0.05, metalness: 0.1, clippingPlanes: [corte], depthWrite: false }));
+      return cacheObra.get('vidro');
+    }
+    if (w.obra === 'ripado') return matParedeFin({ t: 'tex', id: 'ripado' });
+    return matParedeFin({ t: 'tinta', cor: w.cor || COR_PAREDE_PADRAO });
+  }
   const cobreDe = (f) => (f.t === 'tex' ? (texParedePorId[f.id]?.cobre || 1.2) : 1.2);
 
   // ------------------------------------------------------------ arquitetura
@@ -142,6 +151,37 @@ export function createView3D(container, opts = {}) {
     return m;
   }
 
+  // ------------------------------------------------------------ obra: prévia do desenho e realce
+  const obraG = new THREE.Group(); obraG.renderOrder = 5;
+  function setObraPreview(sp) {
+    if (!obraG.parent) scene.add(obraG);
+    limpar(obraG);
+    if (sp && plan) {
+      const H = plan.tip.peDireito;
+      const m = (cor, op = 0.45) => new THREE.MeshBasicMaterial({ color: cor, transparent: true, opacity: op, depthTest: false });
+      if (sp.linha) {
+        const { a, b, t, alt, ok } = sp.linha;
+        const w = { a, b, t };
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (L > 0.01) { const bx = boxWall(w, 0, L, 0, alt || H, m(ok ? '#2f7de1' : '#e04040', 0.4)); if (bx) obraG.add(bx); }
+      }
+      if (sp.ponto) {
+        const c = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.02, 20), m(sp.pontoTipo === 'parede' || sp.pontoTipo === 'ponta' ? '#18a058' : '#2f7de1', 0.9));
+        c.position.set(sp.ponto[0], 0.02, sp.ponto[1]); obraG.add(c);
+        const haste = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, H, 6), m('#2f7de1', 0.6));
+        haste.position.set(sp.ponto[0], H / 2, sp.ponto[1]); obraG.add(haste);
+      }
+      for (const id of [].concat(sp.sel || [])) {
+        for (const pc of plan.pieces.filter((q) => q.w.id === id && !q.verga)) { const bx = boxWall(pc.w, pc.s0, pc.s1, pc.z0, pc.z1 + 0.01, m(sp.selCor || '#f2a900', 0.45), pc.w.t + 0.03); if (bx) obraG.add(bx); }
+      }
+      if (sp.vao) {
+        const w = plan.tip.walls.find((q) => q.id === sp.vao.wall);
+        if (w) { const bx = boxWall(w, sp.vao.de, sp.vao.de + sp.vao.largura, sp.vao.z0 ?? 0, sp.vao.z1 ?? 2.1, m(sp.vao.ok ? '#18a058' : '#e04040', 0.5), w.t + 0.05); if (bx) obraG.add(bx); }
+      }
+    }
+    requestRender();
+  }
+
   function construirArquitetura() {
     limpar(estrutura); limpar(paredesG); wallGroups.clear(); caixasParede = [];
     const { tip } = plan, H = tip.peDireito;
@@ -152,8 +192,17 @@ export function createView3D(container, opts = {}) {
       void wi;
     }
     for (const p of plan.pieces) {
-      const m = boxWall(p.w, p.s0, p.s1, p.z0, p.z1, matParede);
-      if (m) { wallGroups.get(p.w.id).g.add(m); caixasParede.push(m); }
+      const m = boxWall(p.w, p.s0, p.s1, p.z0, p.z1, p.w.obra ? matObra(p.w) : matParede);
+      if (m) { m.userData.wallId = p.w.id; wallGroups.get(p.w.id).g.add(m); caixasParede.push(m); }
+      if (p.w.obra === 'vidro' && !p.verga && !p.sob) {
+        // perfis pretos da divisória de vidro
+        for (const [z0, z1] of [[p.z0, p.z0 + 0.03], [p.z1 - 0.03, p.z1]]) { const f = boxWall(p.w, p.s0, p.s1, z0, z1, mat('metal', '#1c1c1e'), p.w.t + 0.01); if (f) wallGroups.get(p.w.id).g.add(f); }
+        for (const s0 of [p.s0, p.s1 - 0.03]) { const f = boxWall(p.w, s0, s0 + 0.03, p.z0, p.z1, mat('metal', '#1c1c1e'), p.w.t + 0.01); if (f) wallGroups.get(p.w.id).g.add(f); }
+      }
+      if (p.w.obra === 'meia' && !p.verga) {
+        const cap = boxWall(p.w, p.s0 - 0.01, p.s1 + 0.01, p.z1, p.z1 + 0.03, mat('madeira', '#a5774b'), p.w.t + 0.04);
+        if (cap) wallGroups.get(p.w.id).g.add(cap);
+      }
       if (p.w.guarda && !p.verga) {
         const cap = boxWall(p.w, p.s0 - 0.01, p.s1 + 0.01, p.z1, p.z1 + 0.025, mat('granito'), p.w.t + 0.04);
         if (cap) wallGroups.get(p.w.id).g.add(cap);
@@ -280,6 +329,21 @@ export function createView3D(container, opts = {}) {
       f.userData = { surface: 'piso', room: r.id };
       pisosG.add(f); pisoMeshes.push(f);
     }
+    // faixas onde havia parede demolida: piso do cômodo vizinho
+    for (const rm of plan.tip.remendos || []) {
+      const r = comodoDoRemendo(rm); if (!r) continue;
+      const shape = new THREE.Shape(rm.poly.map(([x, y]) => new THREE.Vector2(x, -y)));
+      const f = new THREE.Mesh(new THREE.ShapeGeometry(shape), matPiso(pisoDe(acab(), r)));
+      f.rotation.x = -Math.PI / 2; f.position.y = 0.0012; f.receiveShadow = true;
+      f.userData = { surface: 'piso', room: r.id };
+      pisosG.add(f); pisoMeshes.push(f);
+    }
+  }
+  function comodoDoRemendo(rm) {
+    const c = rm.poly.reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]);
+    const e = [rm.poly[1][0] - rm.poly[0][0], rm.poly[1][1] - rm.poly[0][1]], l = Math.hypot(...e) || 1, n = [-e[1] / l, e[0] / l];
+    for (const d of [0.2, -0.2, 0.35, -0.35]) { const r = plan.rooms.find((q) => pointInPoly(c[0] + n[0] * d, c[1] + n[1] * d, q.poly)); if (r) return r; }
+    return null;
   }
 
   // ------------------------------------------------------------ paredes (revestimento interno por borda)
@@ -401,6 +465,15 @@ export function createView3D(container, opts = {}) {
           tetosG.add(tb);
         }
       }
+    }
+    // forro sobre a faixa de parede demolida
+    for (const rm of plan.tip.remendos || []) {
+      const r = comodoDoRemendo(rm); if (!r) continue;
+      const hr = tetoMin(plan, A, r);
+      const shape = new THREE.Shape(rm.poly.map(([x, y]) => new THREE.Vector2(x, -y)));
+      const m = new THREE.Mesh(new THREE.ShapeGeometry(shape), matT(tetoDe(A, r).cor));
+      m.rotation.x = -Math.PI / 2; m.position.y = hr; m.userData = { surface: 'teto', room: r.id };
+      tetosG.add(m); tetoMeshes.push(m);
     }
     void H;
     requestRender();
@@ -671,11 +744,13 @@ export function createView3D(container, opts = {}) {
     };
   }
   function centro() { const { x0, y0, x1, y1 } = plan.bb; return new THREE.Vector3((x0 + x1) / 2, 0.6, (y0 + y1) / 2); }
+  let ocultarTeto = false; // na vitrine de estilos a maquete fica sem as luminárias penduradas num forro invisível
   function aplicarVisibilidadeModo() {
     const forro = mode === 'forro';
     for (const [uid, g] of meshPorUid) {
       const it = store.projeto.itens.find((i) => i.uid === uid);
-      g.visible = !forro || !!catalogoPorId[it?.tipo]?.teto;
+      const teto = !!catalogoPorId[it?.tipo]?.teto;
+      g.visible = forro ? teto : !(teto && ocultarTeto && mode !== 'passeio');
     }
   }
   let autoFit = true, fovManual = false;
@@ -1134,6 +1209,7 @@ export function createView3D(container, opts = {}) {
       return;
     }
     down = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, id: ev.pointerId };
+    if (ferramenta === 'obra') return; // na obra, clique sem arrasto desenha; arrasto gira a maquete
     if (mode === 'forro' || ev.button !== 0) return;
     if (superficieDaFerramenta()) return;
     if (pickGizmo(ev)) {
@@ -1222,6 +1298,7 @@ export function createView3D(container, opts = {}) {
       drag.encostou = encostou;
       return;
     }
+    if (ferramenta === 'obra') { if (ev.pointerType === 'mouse' && !ev.buttons) emitirObra(ev, 'move'); return; }
     // sem arrasto: realce do que está sob o cursor (mouse)
     if (ev.pointerType === 'mouse' && !cursorPreso()) {
       hoverPend = ev;
@@ -1264,6 +1341,16 @@ export function createView3D(container, opts = {}) {
     const nd = Math.max(2.2, dist * 0.45);
     animarCamera(p.clone().addScaledVector(off.normalize(), nd), p, 480);
   }
+  // obra: ponto no piso e parede sob o cursor
+  function emitirObra(ev, tipo) {
+    if (!plan) return;
+    const p = pontoPiso(ev, 0);
+    apontar(ev);
+    const hits = ray.intersectObjects(caixasParede, false);
+    const hw = hits.find((q) => q.object.userData.wallId);
+    opts.onObra?.({ tipo, x: p?.x, y: p?.z, wall: hw?.object.userData.wallId || null, wx: hw?.point.x, wy: hw?.point.z, shift: ev.shiftKey || ev.altKey });
+  }
+  el.addEventListener('contextmenu', (ev) => { if (ferramenta === 'obra') { ev.preventDefault(); opts.onObra?.({ tipo: 'cancel' }); } });
   const up = (ev) => {
     if (mode === 'passeio') {
       ptrs.delete(ev.pointerId);
@@ -1278,6 +1365,11 @@ export function createView3D(container, opts = {}) {
     if (mode === 'passeio' && !cursorPreso()) {
       // toque rápido no Passeio: no mouse, prende o cursor; no dedo, não faz nada (as ações ficam nos botões da mira)
       if (tap && ev.pointerType === 'mouse') { if (travaFalhou) acaoNoPonto(ev); else prenderCursor(); }
+      down = null; return;
+    }
+    if (ferramenta === 'obra') {
+      if (tap && ev.button === 0) emitirObra(ev, 'click');
+      if (tap && ev.button === 2) opts.onObra?.({ tipo: 'cancel' });
       down = null; return;
     }
     if (drag?.kind === 'fix') {
@@ -1601,8 +1693,10 @@ export function createView3D(container, opts = {}) {
   raf = requestAnimationFrame(loop);
 
   return {
-    setPlan(p) {
-      cancelarCarry(true); plan = p; enquadrado = false; meshPorUid.forEach((g) => moveis.remove(g)); meshPorUid.clear(); assinatura.clear(); walk.pos.set(0, 0, 0);
+    setObraPreview,
+    setOcultarTeto(v) { ocultarTeto = !!v; aplicarVisibilidadeModo(); requestRender(); },
+    setPlan(p, manterCamera = false) {
+      cancelarCarry(true); plan = p; if (!manterCamera) enquadrado = false; meshPorUid.forEach((g) => moveis.remove(g)); meshPorUid.clear(); assinatura.clear(); walk.pos.set(0, 0, 0);
       construirArquitetura(); atualizarRecorte(0, true);
     },
     syncItems, syncSel,

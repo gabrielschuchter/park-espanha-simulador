@@ -133,6 +133,21 @@ function restore(s) {
   emit('itens'); emit('acab'); emit('fixos'); emit('sel'); agendarSalvar(); emit('history');
 }
 export function undo() { if (!store.past.length) return; store.future.push(snap()); restore(store.past.pop()); }
+// Pré-visualização (vitrine de estilos): troca o projeto inteiro sem entrar no histórico até confirmar.
+// previewIniciar guarda o estado atual; previewMostrar põe outro estado na tela; previewConfirmar vira uma
+// edição só (desfazer volta ao estado de antes da vitrine); previewCancelar devolve o estado guardado.
+export function previewIniciar() { begin(); return baseline; }
+export function previewMostrar(estado) {
+  const o = typeof estado === 'string' ? JSON.parse(estado) : JSON.parse(JSON.stringify(estado));
+  store.projeto.itens = o.itens; store.projeto.acab = o.acab; store.projeto.fix = o.fix || {};
+  normalizarAcab(store.projeto);
+  if (store.sel && !store.projeto.itens.some((i) => i.uid === store.sel)) store.sel = null;
+  emit('itens'); emit('acab'); emit('fixos'); emit('sel');
+}
+export function previewConfirmar() { commit(); }
+export function previewCancelar() { if (!baseline) return; const b = baseline; baseline = null; previewMostrar(b); emit('history'); }
+export const previewAtivo = () => !!baseline;
+
 export function redo() { if (!store.future.length) return; store.past.push(snap()); restore(store.future.pop()); }
 
 // Interruptores e temperatura de luz: persistem, mas não entram no histórico de desfazer

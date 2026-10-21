@@ -118,12 +118,22 @@ O que continua estimado e pode explicar diferenças de sensação: espessura das
 
 Pia, tanque, bacia, lavatório e box podem ser movidos, girados, ocultados e restaurados; a posição original fica guardada. Portas podem ser retiradas (fica o vão e o batente) e recolocadas; janelas podem ser ocultadas (fica o vão) e recolocadas. Porta retirada deixa de contar nos avisos de giro de porta. Largura e posição dos vãos seguem a planta. Paredes não mudam.
 
-## Estilos de decoração (v7)
+## Estilos de decoração
 
-Os estilos são sugestões de ambientação, não projeto. Três pontos para quem for ler os resultados com espírito crítico.
+Os estilos são sugestões de ambientação, não projeto.
 
-**O que é verificado e o que não é.** A cada aplicação, o motor confere colisão, varredura das portas, avisos da análise e circulação (grade de 5 cm). Peça que cria aviso novo, trava porta ou fecha passagem é descartada, e troca de modelo que piora a análise é desfeita (fica só a cor). Para as três plantas (Meio, Ponta e PCD) e os 12 estilos, `node tools/presets-check.mjs` termina sem aviso novo e sem regressão de circulação em relação ao layout sugerido. Isso garante coerência geométrica dentro das hipóteses já documentadas, não que o resultado seja confortável para uma família real. Como as plantas diferem, o mesmo estilo aceita mais peças em uma tipologia que em outra: o relatório de aplicação soma peças colocadas e descartadas, e boa parte dos descartes é esperada em salas pequenas.
+**O que é verificado.** Cada peça que um estilo acrescenta passa pela auditoria de `src/harmonia.js` antes de entrar: sobreposição em 3D com qualquer objeto (inclusive tapete com tapete, cortina com móvel alto e luminárias de teto entre si), parede cheia atrás de tudo o que é de parede (a largura inteira, na altura do objeto, sem janela, porta ou fim de parede), apoio para o que fica acima do piso, rotação em múltiplos de 90° (45° só para poltrona, planta e peças soltas), nada no giro de porta, nada alto na frente de janela, pendente só sobre mesa ou bancada ou com a base acima de 2,05 m, nenhum aviso novo da análise e nenhuma piora da circulação (grade de 5 cm, passagens e giro de cadeira de rodas). Troca de modelo (sofá maior, mesa redonda, cama de solteiro no quarto 2) passa pelas mesmas regras e, se não couber, fica só a cor. `node tools/harmonia-check.mjs` aplica os 12 estilos nas plantas Meio, Ponta e PCD e termina com zero problemas e zero avisos; `--svg` desenha cada resultado em `tools/plantas/` para conferência visual.
 
-**Cores e materiais.** Os nomes de cor dos estilos ("Areia quente", "Grafite quente") são livres, sem código de marca. Tela não reproduz tinta, e o leque físico continua sendo a referência. Acabamentos como mármore, cimento e madeira são texturas procedurais, não amostras de fornecedor.
+**O que não é verificado.** A auditoria garante coerência geométrica dentro das hipóteses já documentadas, não conforto, gosto ou ergonomia fina. Os quartos das três plantas são pequenos: escrivaninha e poltrona raramente cabem no quarto 2, e a vitrine diz o que ficou de fora. Os nomes de cor dos estilos são livres, sem código de marca, e tela não reproduz tinta. Mármore, cimento e madeira são texturas procedurais, não amostras de fornecedor.
 
-**Limite de escopo.** Estilo não altera paredes nem posição de pia, tanque ou louças. Portas e esquadrias só mudam de cor e de vidro (cinema usa vidro fumê). Em Explorar não há edição; no 3D só o interruptor de luz responde.
+**Limite de escopo.** Estilo não muda paredes nem a posição de pia, tanque ou louças; troca modelo, cor e acessórios dessas peças. Portas e esquadrias mudam só de cor e vidro.
+
+## Obra (paredes e vãos)
+
+A planta oficial não é alterada: o projeto guarda as diferenças (paredes novas, paredes demolidas, vãos abertos e fechados) e o simulador monta a tipologia efetiva a cada mudança. Hipóteses e limites:
+
+- Espessuras usadas: alvenaria 14 cm, drywall 9 cm, meia-parede 12 cm com 1,10 m de altura, divisória de vidro e painel ripado 6 cm. São valores típicos de mercado, não especificação.
+- Fachadas (paredes com um dos lados fora do apartamento) não podem ser demolidas. As demais podem, mas isso é simulação: no Park Espanha não foi verificado se as paredes internas são estruturais. Em alvenaria estrutural, demolir ou abrir vão costuma ser proibido. Qualquer obra real depende de projeto, responsável técnico (ART ou RRT) e autorização do condomínio e da construtora.
+- Paredes da planta só podem ser demolidas ou restauradas, não deslocadas, porque os cômodos (piso, forro, nome e área) seguem a planta oficial. Paredes novas dividem o ambiente visualmente e entram na colisão, na análise e no Passeio, mas não criam um cômodo novo com área própria.
+- Onde havia parede demolida, o piso e o forro do cômodo vizinho cobrem a faixa.
+- As paredes novas recebem cor própria; o pincel de Paredes atua sobre as paredes da planta.

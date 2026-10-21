@@ -1,6 +1,6 @@
 import os, sys
 from playwright.sync_api import sync_playwright
-URL='file://'+os.path.abspath('dist/index.html'); OUT='tools/shots4'
+URL='file://'+os.path.abspath('dist/index.html'); OUT='tools/shots5'
 ARGS=["--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader","--ignore-gpu-blocklist"]
 J=lambda pg,e: pg.evaluate(e)
 tip=sys.argv[1] if len(sys.argv)>1 else 'meio'
@@ -17,7 +17,7 @@ with sync_playwright() as p:
     for t in ids:
         J(pg,f"window.__pe.aplicarTema(window.__pe.TEMAS.find(x=>x.id==='{t}'))");
         per=J(pg,f"window.__pe.TEMAS.find(x=>x.id==='{t}').periodo"); J(pg,f"window.__pe.view3d.setPeriodo('{'dia' if per=='dia' else per}')")
-        for r in ['sala','coz'] if 'coz' in rooms else ['sala']:
+        for r in ['sala','coz','qb','qa','b1','serv'] if 'qb' in rooms else ['sala','coz','q2','q1','b1','serv']:
             J(pg,f"window.__pe.view3d.irPara('{r}')"); pg.wait_for_timeout(1700)
             pg.screenshot(path=f'{OUT}/t-{tip}-{t}-{r}.png', timeout=120000)
         J(pg,"window.__pe.undo()"); pg.wait_for_timeout(300)
