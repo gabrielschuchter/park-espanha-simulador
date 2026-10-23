@@ -55,6 +55,15 @@ export function createView3D(container, opts = {}) {
     else { controls.rotateSpeed = 1.3; controls.dampingFactor = 0.14; }
   };
   renderer.domElement.addEventListener('pointerdown', (ev) => perfilEntrada(ev.pointerType), { capture: true });
+  // O OrbitControls escala o zoom pelo deltaY sem teto: rodas com aceleração do sistema, trackpad com inércia e
+  // Firefox (deltaMode em linhas) mandam eventos enormes, e um único evento aproxima ou afasta a câmera de uma vez,
+  // com o zoomToCursor arrastando o alvo junto. Aqui o efeito de cada evento é limitado a um passo de roda comum.
+  const ZOOM_BASE = controls.zoomSpeed;
+  renderer.domElement.addEventListener('wheel', (ev) => {
+    // mesma normalização que o OrbitControls aplica (linha x16, página x100, pinça do trackpad x10)
+    const d = Math.abs(ev.deltaY) * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 100 : 1) * (ev.ctrlKey ? 10 : 1);
+    controls.zoomSpeed = ZOOM_BASE * (d > 120 ? 120 / d : 1);
+  }, { capture: true, passive: true });
   // Safari do iOS dá zoom na página com a pinça mesmo com touch-action: none
   for (const n of ['gesturestart', 'gesturechange', 'gestureend']) renderer.domElement.addEventListener(n, (e) => e.preventDefault());
 
@@ -1167,7 +1176,8 @@ export function createView3D(container, opts = {}) {
     try { const r = el.requestPointerLock?.(); if (r?.catch) r.catch(() => { travaFalhou = true; opts.onCursor?.(false, true); }); } catch { travaFalhou = true; }
   }
   function soltarCursor() { if (cursorPreso()) document.exitPointerLock(); }
-  document.addEventListener('pointerlockchange', () => { walk.keys.delete('mouse'); opts.onCursor?.(cursorPreso(), travaFalhou); if (!cursorPreso()) opts.onHover?.(null); });
+  let travouEm = -1e9;
+  document.addEventListener('pointerlockchange', () => { travouEm = performance.now(); walk.keys.delete('mouse'); opts.onCursor?.(cursorPreso(), travaFalhou); if (!cursorPreso()) opts.onHover?.(null); });
   document.addEventListener('pointerlockerror', () => { travaFalhou = true; opts.onCursor?.(false, true); });
   function centroTela() { const r = el.getBoundingClientRect(); return { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }; }
   // ação no que está na mira: confirmar o móvel carregado, pintar com a ferramenta ativa, acender a luz ou abrir a edição
@@ -1237,7 +1247,14 @@ export function createView3D(container, opts = {}) {
     if (mode === 'passeio' && cursorPreso()) {
       walkAnim = null;
       const k = 0.0032 * (camera.fov / fovAuto());
-      walk.yawT += (ev.movementX || 0) * k; walk.pitchT = Math.max(-1.25, Math.min(1.25, walk.pitchT - (ev.movementY || 0) * k));
+      // Com o cursor preso, o navegador às vezes entrega um movementX gigante de uma vez (ao travar, ao destravar,
+      // com o mouse acordando ou na troca de janela). Aplicado cru, vira um giro violento "do nada".
+      // Saltos absurdos são descartados e o resto é limitado por evento.
+      const mx = ev.movementX || 0, my = ev.movementY || 0;
+      if (ev.timeStamp - travouEm < 120 || Math.abs(mx) > 500 || Math.abs(my) > 500) return;
+      const lim = 80;
+      walk.yawT += Math.max(-lim, Math.min(lim, mx)) * k;
+      walk.pitchT = Math.max(-1.25, Math.min(1.25, walk.pitchT - Math.max(-lim, Math.min(lim, my)) * k));
       dirty = true; return;
     }
     if (mode === 'passeio') {
@@ -1255,7 +1272,9 @@ export function createView3D(container, opts = {}) {
         // reduzido na mesma proporção quando o zoom do Passeio fecha o campo de visão.
         const rad_px = (ev.pointerType === 'touch' ? 0.0074 : 0.0050) * (camera.fov / fovAuto());
         const ini = down.moveu ? [down.lx, down.ly] : [down.x, down.y];
-        const ddx = (ev.clientX - ini[0]) * rad_px, ddy = (ev.clientY - ini[1]) * rad_px;
+        // um evento nunca gira mais que ~0,35 rad (evita salto se o ponteiro "teletransporta" ou se o último ponto ficou velho)
+        const cap = (v) => Math.max(-0.35, Math.min(0.35, v));
+        const ddx = cap((ev.clientX - ini[0]) * rad_px), ddy = cap((ev.clientY - ini[1]) * rad_px);
         down.moveu = true;
         walk.yawT += ddx; walk.pitchT = Math.max(-1.25, Math.min(1.25, walk.pitchT - ddy));
         const agora = ev.timeStamp, dtm = Math.max(8, agora - down.lt) / 1000;
@@ -1718,6 +1737,7 @@ export function createView3D(container, opts = {}) {
     refreshLuz() { if (!plan) return; aplicarEmissivos(); atualizarPool(); atualizarPontos(); },
     setMode(m) { if (m === mode) return; if (m !== 'passeio') cancelarCarry(); mode = m; walk.keys.clear(); aplicarModo(); opts.onMode?.(m); },
     getMode: () => mode,
+    camDist: () => camera.position.distanceTo(controls.target),
     getInteracao: () => interacao,
     setInteracao(m) {
       m = m === 'editar' ? 'editar' : 'explorar';
